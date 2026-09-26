@@ -33,7 +33,7 @@ class FakeCommands:
 
 def extracted(repo, commit, release):
     (release / 'cursor_bridge').mkdir()
-    (release / 'cursor_bridge/requirements.txt').write_text('cursor-sdk==1.0.32\n')
+    (release / 'cursor_bridge/cli.py').touch()
     (release / 'pyproject.toml').write_text('[project]\nname="cursor-bridge"\n')
 
 
@@ -80,14 +80,15 @@ class DeployTests(unittest.TestCase):
         self.assertEqual(systemd[1][2], 'enable')
         self.assertFalse(any(word in ('--now', 'start', 'restart', 'stop') for args in systemd for word in args))
 
-    def test_install_is_idempotent_and_uses_pinned_requirements(self):
+    def test_install_is_idempotent_and_resolves_package_dependencies_once(self):
         self.deploy(install_only=True)
         first = len(self.runner.calls)
         self.deploy(install_only=True)
         self.assertEqual(len(self.runner.calls), first + 1)
         install = [args for args in self.runner.calls if 'install' in args]
-        self.assertTrue(any('-r' in args and args[-1].endswith('requirements.txt') for args in install))
-        self.assertTrue(any('--no-deps' in args for args in install))
+        self.assertEqual(len(install), 1)
+        self.assertEqual(install[0][-1], str(self.root / SHA))
+        self.assertNotIn('--no-deps', install[0])
 
     def test_failed_install_preserves_current_and_removes_only_new_release(self):
         self.root.mkdir()

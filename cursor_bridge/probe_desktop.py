@@ -24,7 +24,7 @@ import uuid
 
 from cursor_bridge.cursor_sdk2api import Service, make_server
 from cursor_bridge.responses_protocol import request_payload, unwrap_fence
-from cursor_bridge.spike_tools import parse_output, strict_json
+from cursor_bridge.tool_output import parse_output, strict_json
 
 ROOT = Path(__file__).resolve().parent
 FINAL_TEXT = "DESKTOP_NAMESPACE_PROBE_OK"

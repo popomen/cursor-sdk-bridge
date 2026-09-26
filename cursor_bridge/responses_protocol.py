@@ -7,8 +7,9 @@ import time
 import uuid
 
 from jsonschema import Draft202012Validator
+from cursor_bridge.failures import InvalidRequest
 from cursor_bridge.request_log import REQUEST_STATS
-from cursor_bridge.spike_tools import parse_output, strict_json
+from cursor_bridge.tool_output import parse_output, strict_json
 
 MODELS = {f"claude-opus-5-5-{effort}": effort for effort in ("high", "xhigh", "max")}
 REQUEST_MARKER = "\nRequest:\n"
@@ -24,12 +25,6 @@ OMITTED_IMAGE = f"[Image omitted: only the latest {MAX_ATTACHED_IMAGES} images a
 IMAGE_NOTE = (" Images in the request are replaced by input_text placeholders: " + ATTACHED_IMAGE.format("N")
               + " is the N-th image attached to this message; an omitted placeholder is an earlier image "
               "that is no longer attached.")
-
-
-class InvalidRequest(ValueError):
-    def __init__(self, message, param=None, code="unsupported_request"):
-        super().__init__(message)
-        self.param, self.code = param, code
 
 
 def qualified_name(name, namespace=None):

@@ -355,6 +355,66 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(final["output"][0]["type"], "message")
                 await self.idle()
 
+    async def test_changed_history_rebuilds_and_replays_completed_pending_tool(self):
+        self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "old context")],
+                            [("tools", [("lookup", {"key": "a"})]), ("text", "updated context")]]
+        history = [{"role": "user", "content": "initial environment"}]
+        first, _, _ = await self.turn(history, tools=[TOOL])
+        history[0]["content"] = "environment changed after a directory change"
+        history += first["output"] + [{"type": "function_call_output",
+            "call_id": first["output"][0]["call_id"], "output": "already executed"}]
+        final, stats, _ = await self.turn(history, tools=[TOOL])
+        self.assertEqual(stats["reuse_reason"], "tool_continuation_history_changed")
+        self.assertEqual(stats["replayed_tools"], 1)
+        self.assertEqual(final["output"][0]["content"][0]["text"], "updated context")
+        self.assertTrue(self.sdk.runs[0].cancelled)
+        self.assertIn("environment changed", self.sdk.sent[-1][1])
+        self.assertEqual(len(self.sdk.created), 2)
+        self.assertEqual(self.sdk.callback_results, [{"content": [{"type": "text", "text": "already executed"}]}])
+
+    async def test_changed_history_cannot_change_or_omit_pending_calls(self):
+        self.sdk.scripts = [[("tools", [("lookup", {"key": "a"}), ("lookup", {"key": "b"})]),
+                            ("text", "complete")]]
+        history = [{"role": "user", "content": "initial"}]
+        first, _, _ = await self.turn(history, tools=[TOOL])
+        complete = history + first["output"] + [{"type": "function_call_output",
+            "call_id": item["call_id"], "output": "saved"} for item in first["output"]]
+        for alteration in ("arguments", "missing_result", "missing_call"):
+            with self.subTest(alteration=alteration):
+                changed = copy.deepcopy(complete)
+                changed[0]["content"] = "changed environment"
+                if alteration == "arguments":
+                    changed[1]["arguments"] = '{"key":"forged"}'
+                elif alteration == "missing_result":
+                    changed.pop()
+                else:
+                    changed.pop(4)
+                    changed.pop(2)
+                with self.assertRaises(InvalidRequest):
+                    await self.turn(changed, tools=[TOOL])
+                self.assertFalse(self.sdk.runs[0].cancelled)
+                self.assertEqual(self.backend.progress()["pending_tools"], 2)
+        final, _, _ = await self.turn(complete, tools=[TOOL])
+        self.assertEqual(final["output"][0]["content"][0]["text"], "complete")
+        self.assertEqual(len(self.sdk.created), 1)
+
+    async def test_changed_history_cannot_replace_numeric_argument_with_boolean(self):
+        tool = {**TOOL, "parameters": {"type": "object"}}
+        self.sdk.scripts = [[("tools", [("lookup", {"key": 1})]), ("text", "complete")]]
+        history = [{"role": "user", "content": "initial"}]
+        first, _, _ = await self.turn(history, tools=[tool])
+        complete = history + first["output"] + [{"type": "function_call_output",
+            "call_id": first["output"][0]["call_id"], "output": "saved"}]
+        changed = copy.deepcopy(complete)
+        changed[0]["content"] = "changed environment"
+        changed[1]["arguments"] = '{"key":true}'
+        with self.assertRaises(InvalidRequest):
+            await self.turn(changed, tools=[tool])
+        self.assertFalse(self.sdk.runs[0].cancelled)
+        self.assertEqual(self.backend.progress()["pending_tools"], 1)
+        await self.turn(complete, tools=[tool])
+        self.assertEqual(len(self.sdk.created), 1)
+
     async def test_branch_is_cold_after_first_successor_claim(self):
         self.sdk.scripts = [[("text", "parent")], [("text", "branch a")], [("text", "branch b")]]
         history = [{"role": "user", "content": "first"}]

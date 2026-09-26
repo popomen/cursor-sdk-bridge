@@ -8,6 +8,14 @@ class AdapterFailure(RuntimeError):
         super().__init__(self.label)
 
 
+class InvalidRequest(AdapterFailure, ValueError):
+    label = "invalid_request"
+
+    def __init__(self, message, param=None, code="unsupported_request"):
+        ValueError.__init__(self, message)
+        self.param, self.code = param, code
+
+
 class DeadlineExpired(AdapterFailure):
     label = "deadline_expired"
 

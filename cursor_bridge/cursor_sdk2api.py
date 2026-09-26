@@ -141,6 +141,8 @@ class Service:
                 self.ledger.put(digest, result, stats)
             return result
         except BaseException as exc:
+            if isinstance(exc, InvalidRequest):
+                stats["request_error"] = exc.code
             outcome = "service_stopped" if isinstance(exc, asyncio.CancelledError) else failure_label(exc)
             raise
         finally:
@@ -377,7 +379,7 @@ class Handler(BaseHTTPRequestHandler):
                 if started:
                     emit("response.failed", {"response": {**shell, "status": "failed", "error": error}})
                 else:
-                    self._json(400 if isinstance(exc, PromptTooLarge) else 502, {"error": error})
+                    self._json(400 if isinstance(exc, (PromptTooLarge, InvalidRequest)) else 502, {"error": error})
             except (BrokenPipeError, ConnectionResetError):
                 pass
         finally:

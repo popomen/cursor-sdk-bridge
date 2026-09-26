@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from cursor_bridge import cursor_sdk2api
 from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.failures import (DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete,
+from cursor_bridge.failures import (DeadlineExpired, InvalidRequest, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete,
                       error_code, failure_label)
 from cursor_bridge.request_log import REQUEST_STATS, RequestLog
 from cursor_bridge.responses_protocol import FORMAT_REMINDER, prepare_request, request_payload
@@ -87,6 +87,7 @@ class LabelTests(unittest.TestCase):
         cases = [(DeadlineExpired(), "deadline_expired"), (UpstreamIncomplete(), "upstream_incomplete"),
                  (ModelMismatch(), "model_mismatch"), (IsolationFailed(), "isolation_failed"),
                  (KeyInvalid(), "key_invalid"), (RuntimeError("secret-upstream-body"), "upstream_error:RuntimeError"),
+                 (InvalidRequest("secret-request-body"), "invalid_request"),
                  ("secret-model-text is not JSON", "invalid_model_output")]
         for result, label in cases:
             with self.subTest(label=label):
@@ -100,6 +101,12 @@ class LabelTests(unittest.TestCase):
         self.sdk.results = [UpstreamIncomplete()]
         status, result = self.post({"model": MODEL, "input": "test"})
         self.assertEqual((status, result["error"]["code"]), (502, "upstream_incomplete"))
+
+    def test_backend_request_rejection_is_400_without_private_details(self):
+        self.sdk.results = [InvalidRequest("private request detail")]
+        status, result = self.post({"model": MODEL, "input": "test"})
+        self.assertEqual((status, result["error"]["code"]), (400, "invalid_request"))
+        self.assertNotIn("private", json.dumps(result))
 
     def test_inner_sdk_timeout_is_deadline_not_runtime_error(self):
         # Python 3.11 aliases all three; the old handler turned an inner deadline into RuntimeError.

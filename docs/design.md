@@ -1,7 +1,5 @@
 # Engine migration
 
-The source adapter was migrated from the personal `codex-cursor-fallback` skill. Its original incident and experiment records are preserved under `docs/archive/`; historical commands there use the old layout.
-
 The stateful design was informed by [Sunnyender-org/cursor-sdk2api](https://github.com/Sunnyender-org/cursor-sdk2api), inspected locally at commit `b4b53b628701f1eb455678911494cde58f51f476` (MIT). This project implements the ideas independently in Python; it does not copy that project's code. The Python SDK contract differs: custom tools are registered when creating or resuming an agent, not on `send`.
 
 ## Independently selectable engines
@@ -14,6 +12,10 @@ The stateful design was informed by [Sunnyender-org/cursor-sdk2api](https://gith
 
 Native built-in shell, file and task tools remain disabled. Only registered client callbacks can request external work. The client performs that work and returns results. Namespace names are mapped to SDK-safe aliases and restored in the public protocol. Images stay out of prompts and logs; new turns attach only their new images when resuming.
 
+The three public aliases select SDK model `claude-opus-5-5`, context `1m`, fast mode `false`, and the named effort. A returned model mismatch fails the request; there is no silent model fallback. Messages supports client custom tools, text, images and tool results; it filters Anthropic server tools such as hosted web search. It does not forward every Anthropic generation option, including `max_tokens`, `thinking`, `output_config` and cache-control directives.
+
+`count_tokens` is an estimate. Real usage comes from the SDK, whose input total already includes cache reads and writes; Messages subtracts both to report uncached `input_tokens` separately.
+
 ## Ownership and recovery
 
 The service owns each inference, not the HTTP handler. Closing a socket does not cancel the job. Identical requests join an in-flight future, or replay a completed response from a private SQLite ledger. The key includes expanded history, request policy and engine mode; it ignores transport-only `stream`, `store` and `previous_response_id` fields. Successful results are retained for one hour by default, within a 256 MiB retained-payload limit. Expiry or capacity eviction makes a later request cold. Failed inference is not automatically retried.
@@ -24,9 +26,13 @@ Lineage indexes retain policy/history hashes and SDK agent IDs. A validated comp
 
 Native callback Futures and run consumers outlive a public tool-call response. Pending calls have a deadline and contribute to the unfinished-work count. Cold recovery reconstructs history and replays recorded results for already-completed tool signatures, in occurrence order, without asking the client to repeat their effects.
 
+If a client edits earlier history while returning a pending batch, the bridge first verifies every pending call's ID, name, argument types and result. It then retires that paused run and rebuilds from the updated history. Incomplete or altered pending calls are rejected without consuming their results.
+
 ## Streaming and operations
 
 Live deltas use stable item IDs through final responses and durable replay. A partial stream that fails ends with an error, never a fabricated completion. Responses events follow the [OpenAI streaming guide](https://developers.openai.com/api/docs/guides/streaming-responses); Messages emits thinking/text content-block deltas. The bridge does not fabricate upstream reasoning signatures; a local empty signature accompanies synthesized Messages thinking blocks and is ignored on input.
+
+Codex keepalives use `response.in_progress` data events; SSE comments alone do not keep its stream watchdog alive.
 
 Deployment installs a committed release in its own directory and virtual environment. User units point at that commit, never the mutable source checkout. Restart first closes admission, confirms zero unfinished work and zero open connections, then restarts the unit. The dashboard compares deployed and running commits. See [operations](operations.md).
 

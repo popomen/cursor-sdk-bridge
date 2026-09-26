@@ -27,4 +27,4 @@ See [operations](docs/operations.md) for deployment, safe restart, client switch
 PYTHONDONTWRITEBYTECODE=1 ~/.codex/cursor-sdk2api/venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-`docs/archive/` preserves incident and experiment records from `codex-cursor-fallback`; commands in those historical records refer to the old skill layout. Current sanitized experiment receipts belong in `docs/evidence/`.
+Current sanitized experiment receipts belong in `docs/evidence/`. Earlier skill-era investigations remain in Git history; use the current operations guide for commands and recovery.

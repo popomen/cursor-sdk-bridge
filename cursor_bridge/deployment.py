@@ -125,13 +125,11 @@ def install_release(repo, commit, root, runner=command, extractor=extract_commit
     release.mkdir(mode=0o755)
     try:
         extractor(repo, resolved, release)
-        requirements = release / 'cursor_bridge/requirements.txt'
-        if not requirements.is_file() or not (release / 'pyproject.toml').is_file():
+        if not (release / 'pyproject.toml').is_file() or not (release / 'cursor_bridge/cli.py').is_file():
             raise DeploymentError('Commit is not a cursor-bridge release')
         runner([sys.executable, '-m', 'venv', release / 'venv'], timeout=120)
         python = release / 'venv/bin/python'
-        runner([python, '-m', 'pip', 'install', '--disable-pip-version-check', '-r', requirements], timeout=600)
-        runner([python, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-deps', release], timeout=300)
+        runner([python, '-m', 'pip', 'install', '--disable-pip-version-check', release], timeout=600)
         runner([python, '-m', 'pip', 'check'], timeout=60)
         frozen = runner([python, '-m', 'pip', 'freeze', '--all'], timeout=60).stdout
         # The inventory belongs to the private release; no package-index URLs are logged or committed.

@@ -26,20 +26,14 @@ import urllib.request
 from cursor_bridge import claude_switch, deployment, version
 
 HOME = Path.home()
-SCRIPTS = Path(__file__).resolve().parent
 DEFAULT_PORT = 8791
 # Capabilities of the current adapter code; an instance lacking one still runs code from before they existed.
 REQUIRED_CAPABILITIES = ('sdk_progress', 'anthropic_messages')
-# Read when an adapter process starts, along with the instance's own launchers; a file modified after
-# that start is not in effect yet.
-RUNTIME_FILES = ('cursor_sdk2api.py', 'sdk_backend.py', 'responses_protocol.py', 'anthropic_protocol.py', 'failures.py',
-                 'request_log.py', 'spike_tools.py', 'sdk_http1.mjs', 'serve.sh')
 INSTANCES = (
     {'name': 'codex', 'client': 'Codex', 'port': 8789, 'state_dir': HOME / '.codex/cursor-sdk2api',
-     'unit': 'cursor-bridge-codex.service', 'launchers': (), 'limits': {'max': 1200, 'queue_timeout': 1200}},
+     'unit': 'cursor-bridge-codex.service', 'limits': {'max': 1200, 'queue_timeout': 1200}},
     {'name': 'claude', 'client': 'Claude Code', 'port': claude_switch.DEFAULT_PORT,
      'state_dir': HOME / '.codex/cursor-sdk2api-claude', 'unit': 'cursor-bridge-claude.service',
-     'launchers': ('serve_claude.sh',),
      'limits': {'max': claude_switch.MAX_DEADLINE_S, 'queue_timeout': claude_switch.QUEUE_TIMEOUT_S}},
 )
 LOG_FILES = ('requests.jsonl.3', 'requests.jsonl.2', 'requests.jsonl.1', 'requests.jsonl')
@@ -89,7 +83,7 @@ def fetch_health(port, timeout=2):
 
 def unit_info(unit):
     command = ['systemctl', '--user', 'show', unit, '--no-pager']
-    for field in UNIT_FIELDS + ('ActiveEnterTimestampMonotonic', 'UnitFileState', 'FragmentPath'):
+    for field in UNIT_FIELDS + ('UnitFileState', 'FragmentPath'):
         command += ['-p', field]
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=3)
@@ -98,14 +92,7 @@ def unit_info(unit):
     if done.returncode != 0:
         return None
     values = dict(line.split('=', 1) for line in done.stdout.splitlines() if '=' in line)
-    info = {field: values.get(field) for field in UNIT_FIELDS + ('UnitFileState', 'FragmentPath')}
-    try:
-        started = int(values.get('ActiveEnterTimestampMonotonic') or 0) / 1e6
-    except ValueError:
-        started = 0
-    # systemd reports CLOCK_MONOTONIC microseconds; wall time is needed to compare with file mtimes.
-    info['started_at'] = time.time() - (time.monotonic() - started) if started > 0 else None
-    return info
+    return {field: values.get(field) for field in UNIT_FIELDS + ('UnitFileState', 'FragmentPath')}
 
 
 def established_connections(port, tables=('/proc/net/tcp', '/proc/net/tcp6')):
@@ -126,19 +113,6 @@ def established_connections(port, tables=('/proc/net/tcp', '/proc/net/tcp6')):
             if len(fields) > 3 and fields[3] == '01' and fields[1].rsplit(':', 1)[-1] == '%04X' % port:
                 total += 1
     return total if readable else None
-
-
-def stale_sources(started_at, directory=SCRIPTS, files=RUNTIME_FILES):
-    if not started_at:
-        return []
-    changed = []
-    for name in files:
-        try:
-            if (Path(directory) / name).stat().st_mtime > started_at + 1:
-                changed.append(name)
-        except OSError:
-            continue
-    return changed
 
 
 def run_restart(unit):
@@ -164,6 +138,8 @@ def restart_blocker(item):
         return '端口上有 %d 个未结束的连接，可能有请求正在进行' % connections
     if connections is None and item.get('state') == 'legacy':
         return '旧版服务不上报进度，也读不到连接状态，无法确认是否空闲'
+    if not item.get('running_version') or not item.get('deployed_version'):
+        return '无法确认运行版本或已部署版本'
     return None
 
 
@@ -353,7 +329,7 @@ def describe(spec, health, error):
 class Dashboard:
     def __init__(self, instances=INSTANCES, codex_home=None, claude_settings=None, claude_state=None,
                  health_reader=fetch_health, unit_reader=unit_info, connection_counter=established_connections,
-                 restart_runner=run_restart, source_dir=SCRIPTS, ready_wait_s=READY_WAIT_S,
+                 restart_runner=run_restart, ready_wait_s=READY_WAIT_S,
                  admin_client=deployment.admin_request, version_reader=version.deployed_version):
         codex = Path(codex_home or os.environ.get('CODEX_HOME') or HOME / '.codex')
         claude_dir = Path(os.environ.get('CLAUDE_CONFIG_DIR') or HOME / '.claude')
@@ -362,7 +338,7 @@ class Dashboard:
         self.claude_state = Path(claude_state or codex / 'cursor-fallback-state/claude-code.json')
         self.health_reader, self.unit_reader, self.logs = health_reader, unit_reader, LogReader()
         self.connection_counter, self.restart_runner = connection_counter, restart_runner
-        self.source_dir, self.ready_wait_s = Path(source_dir), ready_wait_s
+        self.ready_wait_s = ready_wait_s
         self.admin_client, self.version_reader = admin_client, version_reader
         # Proves a restart form came from this process's own page; other sites cannot read it.
         self.token = secrets.token_urlsafe(32)
@@ -423,9 +399,11 @@ class Dashboard:
             return self.record(spec, 'refused', '另一个重启还没结束，稍后再试。')
         drained, restarted = False, False
         try:
-            blocker = self.inspect(spec)['restart_blocker']
+            item = self.inspect(spec)
+            blocker = item['restart_blocker']
             if blocker:
                 return self.record(spec, 'refused', '%s，没有重启 %s。等请求结束后再试。' % (blocker, spec['unit']))
+            expected_version = item['deployed_version']
             try:
                 # Mark before sending: a lost response may still have closed admission.
                 drained = True
@@ -443,11 +421,10 @@ class Dashboard:
             if error:
                 return self.record(spec, 'failed', '重启 %s 失败（%s）。' % (spec['unit'], error))
             deadline = time.monotonic() + self.ready_wait_s
-            expected_version = self.version_reader()
             while True:
                 health = self.health_reader(spec['port'])[0]
                 if (health is not None and not health.get('draining', False)
-                        and (expected_version is None or health.get('running_version') == expected_version)):
+                        and health.get('running_version') == expected_version):
                     break
                 if time.monotonic() >= deadline:
                     return self.record(spec, 'failed', '已重启 %s，但 %g 秒内预期版本的 /health 没有恢复，用 systemctl --user '

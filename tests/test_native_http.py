@@ -18,6 +18,10 @@ class NativeHttpTests(unittest.TestCase):
         self.backend.workspace.mkdir()
         self.backend.key = "synthetic"
         self.sdk = self.backend.client = FakeSdk()
+        async def start_fake():
+            if self.backend.client is None:
+                self.backend.client = self.sdk
+        self.backend._start = start_fake
         self.sdk.scripts = [[("thinking", "synthetic thought"), ("text", "Checking."),
                              ("tools", [("lookup", {"key": "a"})]), ("text", "Done.")]]
         self.service = Service(self.backend, mode="native", ledger_path=root / "results.sqlite3")
@@ -73,3 +77,21 @@ class NativeHttpTests(unittest.TestCase):
         self.assertEqual((status, result["content"][0]["text"]), (200, "Done."))
         self.assertEqual(result["usage"]["cache_read_input_tokens"], 80)
         self.assertEqual(len(self.sdk.sent), 1)
+
+    def test_messages_rebuilds_changed_context_without_repeating_tool(self):
+        self.sdk.scripts.append([("tools", [("lookup", {"key": "a"})]), ("text", "Recovered.")])
+        body = {"model": MODEL, "tools": [{"name": TOOL["name"], "input_schema": TOOL["parameters"]}],
+                "messages": [{"role": "user", "content": "original working directory"}]}
+        _, first = self.post("/v1/messages", body)
+        call = first["content"][-1]
+        body["messages"][0]["content"] = "updated working directory"
+        body["messages"] += [{"role": "assistant", "content": first["content"]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call["id"], "content": "executed once"}]}]
+        status, result = self.post("/v1/messages", body)
+        self.assertEqual(status, 200, result)
+        self.assertEqual((status, result["stop_reason"]), (200, "end_turn"))
+        self.assertEqual(result["content"], [{"type": "text", "text": "Recovered."}])
+        self.assertTrue(self.sdk.runs[0].cancelled)
+        self.assertEqual(self.sdk.callback_results, [{"content": [{"type": "text", "text": "executed once"}]}])
+        self.assertEqual(self.post("/v1/messages", body)[1], result)
+        self.assertEqual(len(self.sdk.sent), 2)

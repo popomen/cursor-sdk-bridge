@@ -3,7 +3,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 import http.client
 import json
-import os
 from pathlib import Path
 import socket
 import struct
@@ -24,7 +23,7 @@ NL = chr(10)
 NOW = datetime.now().astimezone()
 MAX = 'claude-opus-5-5-max'
 SPEC = dashboard.INSTANCES[1]
-CURRENT = {'service': 'cursor-sdk2api', 'status': 'ready', 'adapter_version': 3,
+CURRENT = {'service': 'cursor-sdk2api', 'status': 'ready', 'adapter_version': 3, 'running_version': 'current-commit',
            'capabilities': list(dashboard.REQUIRED_CAPABILITIES), 'progress': {'queued': 0, 'active': None},
            'limits': {'deadlines': {'high': 1200.0, 'xhigh': 1200.0, 'max': 1800.0}, 'queue_timeout': 1800.0}}
 LEGACY = {'service': 'cursor-sdk2api', 'status': 'ready', 'adapter_version': 3, 'capabilities': ['image_inputs']}
@@ -64,13 +63,6 @@ class ExpectationTests(unittest.TestCase):
         self.assertEqual(codex['limits'], {'max': DEFAULT_TIMEOUTS['max'], 'queue_timeout': DEFAULT_QUEUE_TIMEOUT})
         self.assertEqual(claude['limits'], {'max': claude_switch.MAX_DEADLINE_S,
                                             'queue_timeout': claude_switch.QUEUE_TIMEOUT_S})
-
-    def test_runtime_files_exist_and_launchers_are_per_instance(self):
-        launchers = [spec['launchers'] for spec in dashboard.INSTANCES]
-        self.assertEqual(launchers, [(), ('serve_claude.sh',)])
-        names = dashboard.RUNTIME_FILES + sum(launchers, ())
-        self.assertEqual([name for name in names if not (dashboard.SCRIPTS / name).exists()], [])
-
 
 class DescribeTests(unittest.TestCase):
     def test_states_and_notes(self):
@@ -311,27 +303,7 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(dashboard.established_connections(8790, (table,)), 0)
             self.assertIsNone(dashboard.established_connections(8789, (missing,)))
 
-    def test_stale_sources_lists_files_changed_after_the_start(self):
-        with tempfile.TemporaryDirectory() as temp:
-            started = time.time() - 100
-            for name, mtime in (('old.py', started - 50), ('new.py', started + 50)):
-                path = Path(temp) / name
-                path.write_text('x')
-                os.utime(path, (mtime, mtime))
-            self.assertEqual(dashboard.stale_sources(started, temp, ('old.py', 'new.py', 'gone.py')), ['new.py'])
-            self.assertEqual(dashboard.stale_sources(None, temp, ('new.py',)), [])
-
-    def test_launcher_changes_only_mark_their_own_instance(self):
-        with tempfile.TemporaryDirectory() as temp:
-            (Path(temp) / 'serve_claude.sh').write_text('x')
-            unit = {**UNIT, 'started_at': time.time() - 100}
-            board = dashboard.Dashboard(health_reader=lambda port: (CURRENT, None), unit_reader=lambda name: unit,
-                                        connection_counter=lambda port: 0, source_dir=temp)
-            board.version_reader = lambda: 'deployed'
-            stale = [board.inspect(spec)['needs_restart'] for spec in dashboard.INSTANCES]
-        self.assertEqual(stale, [True, True])
-
-    def test_restart_version_depends_on_deployment_not_checkout_mtime(self):
+    def test_restart_version_compares_running_and_deployed_release(self):
         board = dashboard.Dashboard(health_reader=lambda port: ({**CURRENT, 'running_version': 'abc'}, None),
                                     unit_reader=lambda unit: UNIT, connection_counter=lambda port: 0,
                                     version_reader=lambda: 'abc')
@@ -343,10 +315,11 @@ class HelperTests(unittest.TestCase):
         self.assertEqual((item['running_version'], item['deployed_version']), ('abc', 'def'))
 
     def test_restart_blocker(self):
-        idle = {'state': 'idle', 'active': None, 'queued': 0, 'connections': 0}
+        idle = {'state': 'idle', 'active': None, 'queued': 0, 'connections': 0,
+                'running_version': 'old-commit', 'deployed_version': 'new-commit'}
         cases = [(idle, None), ({**idle, 'active': {'model': MAX}}, '有推理'), ({**idle, 'queued': 2}, '2 个请求'),
-                 ({**idle, 'connections': 3}, '3 个未结束'), ({'state': 'legacy', 'connections': 0}, None),
-                 ({'state': 'legacy', 'connections': None}, '无法确认'), ({'state': 'offline', 'connections': None}, None)]
+                 ({**idle, 'connections': 3}, '3 个未结束'), ({'state': 'legacy', 'connections': 0}, '无法确认'),
+                 ({'state': 'legacy', 'connections': None}, '无法确认'), ({'state': 'offline', 'connections': None}, '无法确认')]
         for item, expected in cases:
             with self.subTest(item=item):
                 blocker = dashboard.restart_blocker(item)
@@ -365,11 +338,13 @@ class RestartTests(unittest.TestCase):
         spec = {**dashboard.INSTANCES[1], 'port': 2}
         return dashboard.Dashboard((spec,), health_reader=lambda port: health, unit_reader=lambda unit: None,
                                    connection_counter=lambda port: connections, restart_runner=runner,
-                                   ready_wait_s=0.2, version_reader=lambda: None,
+                                   ready_wait_s=0.2, version_reader=lambda: CURRENT['running_version'],
                                    admin_client=lambda port, action: {'draining': action == 'drain', 'unfinished': 0})
 
     def test_restart_waits_for_health_and_reports_when_it_does_not_return(self):
-        result = self.board((None, 'URLError')).restart('claude')
+        board = self.board((CURRENT, None))
+        board.health_reader = lambda port: (None, 'URLError') if self.calls else (CURRENT, None)
+        result = board.restart('claude')
         self.assertEqual((result['result'], self.calls), ('failed', ['cursor-bridge-claude.service']))
         self.assertIn('没有恢复', result['message'])
 
@@ -428,6 +403,20 @@ class RestartTests(unittest.TestCase):
         self.assertEqual(board.restart('claude')['result'], 'failed')
         self.assertEqual(self.calls, ['cursor-bridge-claude.service'])
 
+    def test_missing_release_identity_refuses_before_draining(self):
+        for missing in ('running', 'deployed'):
+            with self.subTest(missing=missing):
+                current = {**CURRENT, 'running_version': None} if missing == 'running' else CURRENT
+                board = self.board((current, None))
+                if missing == 'deployed':
+                    board.version_reader = lambda: None
+                actions = []
+                board.admin_client = lambda port, action: actions.append(action)
+                result = board.restart('claude')
+                self.assertEqual(result['result'], 'refused')
+                self.assertIn('无法确认', result['message'])
+                self.assertEqual((self.calls, actions), ([], []))
+
     def test_success_does_not_resume_old_process(self):
         board = self.board((CURRENT, None))
         actions = []
@@ -458,13 +447,13 @@ class HTTPTests(unittest.TestCase):
                                                 + json.dumps('claude-opus-5-5-high') + NL)
         instances = ({**dashboard.INSTANCES[0], 'port': 1, 'state_dir': root / 'codex-missing'},
                      {**dashboard.INSTANCES[1], 'port': 2, 'state_dir': root / 'claude'})
-        healths = {1: (LEGACY, None), 2: (with_active(), None)}
+        healths = {1: ({**LEGACY, 'running_version': CURRENT['running_version']}, None), 2: (with_active(), None)}
         self.restarts = []
         self.board = dashboard.Dashboard(instances, codex_home=root / 'codex', claude_settings=root / 'missing.json',
                                          claude_state=root / 'state.json', health_reader=lambda port: healths[port],
                                          unit_reader=lambda unit: UNIT, connection_counter=lambda port: 0,
-                                         restart_runner=self.restarts.append, source_dir=root, ready_wait_s=0.2,
-                                         version_reader=lambda: None,
+                                         restart_runner=self.restarts.append, ready_wait_s=0.2,
+                                         version_reader=lambda: CURRENT['running_version'],
                                          admin_client=lambda port, action: {'draining': action == 'drain', 'unfinished': 0})
         self.server = dashboard.make_server(self.board, 0)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)

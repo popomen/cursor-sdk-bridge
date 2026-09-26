@@ -1,4 +1,0 @@
-cursor-sdk==1.0.32
-jsonschema==4.26.0
-tomlkit==0.13.3
-websockets==15.0.1

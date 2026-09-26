@@ -10,6 +10,8 @@
 
 The SDK key stays at `~/.codex/cursor-sdk-api-key`. Client backups and transaction journals stay at `~/.codex/cursor-fallback-state`. Deployment never moves these paths or changes their permissions. Logs contain request metadata, never prompt text, tool results, model output or credentials.
 
+The SDK requires a Cursor User API key, not the CLI OAuth token. Its native bridge defaults to proxychains, preferring the user's executable wrapper; `CURSOR_FALLBACK_PROXYCHAINS` can select an absolute executable path. A readable model catalog does not prove that the inference network route works.
+
 ## Install and select a release
 
 Commit and test the source before deployment. From the project checkout:
@@ -53,8 +55,6 @@ For an adapter, the command first reads current progress and sockets. It then se
 
 Only a confirmed zero unfinished count and zero established connections after the admin response closes permit `systemctl --user restart`. Unknown progress, unavailable drain support, pending work or open connections cause refusal. Any failure attempts `POST /admin/resume`; if resume fails, inspect `draining` in `/health` before retrying. The dashboard button uses the same guard. Restarting the dashboard only affects the UI process.
 
-The first migration from the old `cursor-sdk2api*.service` transient units is a separate coordinated cutover: those units do not support the drain protocol. Validate the new release on temporary ports first; immediately before stopping an old adapter, verify `progress.active == null`, `progress.queued == 0`, and no established sockets. Start the replacement on the production port and verify its commit, limits and progress. If verification fails, stop the replacement and restore the old unit. Keep the old unit definitions and release until all acceptance checks pass. Never stop a running inference just because its client disconnected.
-
 ## Client switching
 
 Claude Code keeps its existing settings backup and user-selected Cursor model tier:
@@ -65,6 +65,8 @@ cursor-bridge switch claude restore
 ```
 
 The first Cursor switch performs two real synthetic tool outputs at high effort, usually around one to two minutes. Repeating an already valid switch checks compatibility and updates managed settings without repeating inference. New sessions use the selected provider; existing sessions and Mew settings are untouched. Cursor model aliases keep `[1m]`; stream idle timeout, nonstreaming fallback, retry limits and `x-should-retry` handling remain part of the adapter compatibility contract.
+
+`[1m]` tells Claude Code to plan a larger context window; the alias selects SDK effort. Keep the managed `API_TIMEOUT_MS`, `CLAUDE_STREAM_IDLE_TIMEOUT_MS`, `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK` and `CLAUDE_CODE_MAX_RETRIES` values. Ping traffic alone does not necessarily reset its event watchdog. Queue wait, SDK inference and the total request guard have separate limits and errors (`queue_timeout`, `deadline_expired`, `request_timeout`); inspect `/health.limits` rather than copying historical timeout values.
 
 Codex switching must run from an independent SSH terminal, after disconnecting Desktop and waiting for all daemon tasks to finish:
 
@@ -92,5 +94,7 @@ cursor-bridge probe --image --port 9889
 ```
 
 A probe consumes one or two real SDK outputs; high effort typically takes one to two minutes. Announce expected quota use before running it. Probe metadata and sanitized receipts belong in `docs/evidence`; never store request content or credentials there. Authentication failures require a credential-validity check before more paid inference.
+
+`invalid_request` is a local adapter rejection. Its `request_error` log field identifies the failed validation, such as `pending_results_mismatch`; it is not an upstream SDK error. Inspect the pending batch before retrying or restarting.
 
 For an application rollback, deploy a known-good commit, then restart each idle adapter with the guarded command. Keep the same state paths. For a behavior rollback, start an instance with `--mode legacy` after the same idle checks. Provider restore commands restore the original managed client settings; they do not migrate existing conversations. A failed deployment restores previous unit file contents and the prior `current` link; it does not restart running processes.

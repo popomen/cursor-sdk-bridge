@@ -16,4 +16,4 @@ cursor-bridge = "cursor_bridge.cli:main"
 packages = ["cursor_bridge"]
 
 [tool.setuptools.package-data]
-cursor_bridge = ["assets/*.json", "*.json", "*.mjs", "*.sh", "requirements.txt"]
+cursor_bridge = ["assets/*.json", "*.mjs"]

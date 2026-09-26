@@ -201,4 +201,6 @@ def failure_error(label, prompt_bytes, limit):
     """HTTP status and Anthropic error body for an adapter failure label; never upstream text."""
     if label == PromptTooLarge.label:
         return 400, error_body("invalid_request_error", prompt_too_long(prompt_bytes, limit))
+    if label == InvalidRequest.label:
+        return 400, error_body("invalid_request_error", "Cursor bridge rejected the request (invalid_request)")
     return 500, error_body("api_error", "Cursor SDK response failed (" + label + ")")

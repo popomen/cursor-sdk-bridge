@@ -25,7 +25,7 @@ from cursor_bridge.responses_protocol import (
 )
 from cursor_bridge.reuse_backend import GeneratedText, canonical_history, policy_digest, _chain, _digest, _latest_input
 from cursor_bridge.sdk_backend import SDKBackend, USAGE_FIELDS
-from cursor_bridge.spike_tools import model_identity, snapshot
+from cursor_bridge.sdk_support import model_identity, snapshot
 
 
 _RECOVERY_REBUILD = contextvars.ContextVar("native_recovery_rebuild", default=False)
@@ -200,7 +200,7 @@ class NativeSDKBackend(SDKBackend):
                     for item in history if item.get("type") == "function_call_output"
                     and item["call_id"] in self._by_call}
         if len(sessions) > 1:
-            raise InvalidRequest("Tool results refer to multiple active runs")
+            raise InvalidRequest("Tool results refer to multiple active runs", code="multiple_pending_runs")
         return next(iter(sessions.values()), None)
 
     async def generate_request(self, model, prompt, body, history, images=(), on_event=None):
@@ -249,7 +249,7 @@ class NativeSDKBackend(SDKBackend):
 
     async def _continue(self, session, body, history, policy, on_event):
         if not session.owner_key:
-            raise InvalidRequest("Tool continuation has no validated history")
+            raise InvalidRequest("Tool continuation has no validated history", code="uncommitted_tool_history")
         items, ends, _ = _canonical(history)
         tail = None
         # Match the published assistant/tool history under its original policy.
@@ -258,14 +258,28 @@ class NativeSDKBackend(SDKBackend):
             if key == session.owner_key:
                 tail = history[end:]
                 break
+        history_changed = tail is None
+        if history_changed:
+            # Clients can rewrite earlier context after a cwd change or
+            # compaction. A complete, unchanged pending batch still belongs to
+            # this run, but its updated history must start a fresh SDK agent.
+            calls = [(index, item) for index, item in enumerate(history)
+                     if item.get("type") == "function_call"
+                     and item["call_id"] in session.published_ids]
+            if {item["call_id"] for _, item in calls} != session.published_ids or any(
+                    qualified_name(item["name"], item.get("namespace")) != session.calls[item["call_id"]].name
+                    or _digest(json.loads(item["arguments"])) != _digest(session.calls[item["call_id"]].arguments)
+                    for _, item in calls):
+                raise InvalidRequest("Tool continuation must preserve the pending calls", code="pending_calls_changed")
+            tail = history[calls[-1][0] + 1:]
         if not tail or any(item.get("type", "message") != "function_call_output"
                 and not (item.get("type", "message") == "message" and item.get("role") == "user")
                 for item in tail):
-            raise InvalidRequest("Tool continuation must append results and optional new user input")
+            raise InvalidRequest("Tool continuation must append results and optional new user input", code="invalid_tool_continuation")
         outputs = [item for item in tail if item.get("type") == "function_call_output"]
         results = {item["call_id"]: item["output"] for item in outputs}
         if len(results) != len(outputs) or set(results) != session.published_ids:
-            raise InvalidRequest("Tool results must exactly match the pending batch")
+            raise InvalidRequest("Tool results must exactly match the pending batch", code="pending_results_mismatch")
         expired = isinstance(session.error, DeadlineExpired) or (session.error is None and any(
             session.calls[call_id].future.cancelled() for call_id in session.published_ids))
         if expired:
@@ -273,13 +287,14 @@ class NativeSDKBackend(SDKBackend):
             return await self._rebuild_continuation(session, body, history, on_event,
                                                      "expired_pending_recovery")
         if session.error or any(session.calls[call_id].future.done() for call_id in session.published_ids):
-            raise InvalidRequest("Pending tool results have already been consumed or expired")
+            raise InvalidRequest("Pending tool results have already been consumed or expired", code="pending_results_consumed")
         policy_changed = policy != session.policy
-        if policy_changed or len(outputs) != len(tail):
+        if history_changed or policy_changed or len(outputs) != len(tail):
             # Python's pending callback result has no separate user-message
             # channel. Retire this paused run before a cold reconstruction so
             # extra user text is preserved and completed tools are replayed.
-            reason = "tool_continuation_policy_changed" if policy_changed else "tool_results_with_new_user_input"
+            reason = ("tool_continuation_history_changed" if history_changed else
+                      "tool_continuation_policy_changed" if policy_changed else "tool_results_with_new_user_input")
             return await self._rebuild_continuation(session, body, history, on_event, reason)
         session.history, session.body = copy.deepcopy(history), body
         session.on_event, session.stats = on_event, REQUEST_STATS.get()

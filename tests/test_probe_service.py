@@ -8,7 +8,7 @@ from unittest.mock import patch
 from cursor_bridge.cursor_sdk2api import Service, make_server
 from cursor_bridge.probe_service import ProbeFailed, probe
 from cursor_bridge.responses_protocol import request_payload
-from cursor_bridge.spike_tools import proxychains_binary
+from cursor_bridge.sdk_support import proxychains_binary
 
 
 class EchoSDK:
@@ -76,7 +76,7 @@ class ProxyResolutionTests(unittest.TestCase):
             wrapper.parent.mkdir(parents=True)
             wrapper.write_text('#!/bin/sh\nexit 0\n')
             wrapper.chmod(0o700)
-            with patch('cursor_bridge.spike_tools.Path.home', return_value=home), patch.dict('os.environ', {'CURSOR_FALLBACK_PROXYCHAINS': ''}), patch('cursor_bridge.spike_tools.shutil.which', return_value='/usr/bin/proxychains4'):
+            with patch('cursor_bridge.sdk_support.Path.home', return_value=home), patch.dict('os.environ', {'CURSOR_FALLBACK_PROXYCHAINS': ''}), patch('cursor_bridge.sdk_support.shutil.which', return_value='/usr/bin/proxychains4'):
                 self.assertEqual(proxychains_binary(), str(wrapper))
 
     def test_explicit_relative_or_nonexecutable_proxy_is_rejected(self):

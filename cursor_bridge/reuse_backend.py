@@ -22,7 +22,7 @@ from cursor_bridge.responses_protocol import (
     normalize_tools, qualified_name,
 )
 from cursor_bridge.sdk_backend import SDKBackend, USAGE_FIELDS
-from cursor_bridge.spike_tools import NATIVE_TOOL_EVENTS, model_identity, snapshot
+from cursor_bridge.sdk_support import NATIVE_TOOL_EVENTS, model_identity, snapshot
 
 
 _REQUEST = contextvars.ContextVar("reuse_request", default=None)
