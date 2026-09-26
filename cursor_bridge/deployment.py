@@ -82,8 +82,13 @@ def service_path():
 
 def unit_text(instance, root, release=None):
     current = Path(release) if release is not None else (Path(root) / 'current').resolve()
+    if not current.is_absolute() or any(char in str(current) for char in ('\n', '\r', '\0')):
+        raise DeploymentError('A unit working directory must be an absolute, single-line path')
+    # WorkingDirectory is a scalar path, unlike ExecStart's shell-like word list:
+    # systemd treats surrounding quotes here as literal path characters.
+    working_directory = str(current).replace('%', '%%')
     return (MANAGED + '[Unit]\nDescription=Cursor Bridge ' + instance + '\nAfter=network-online.target\n'
-            '\n[Service]\nType=simple\nWorkingDirectory=' + quote_unit(current) + '\n'
+            '\n[Service]\nType=simple\nWorkingDirectory=' + working_directory + '\n'
             'ExecStart=' + quote_unit(current / 'venv/bin/python') + ' -m cursor_bridge serve ' + instance + '\n'
             'Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1\n'
             'Environment=' + quote_unit('PATH=' + service_path()) + '\n'
@@ -178,6 +183,7 @@ def deploy(commit='HEAD', repo='.', root=None, unit_dir=None, bin_dir=None, inst
         try:
             for path, data in units.items():
                 atomic_write(path, data)
+            runner(['systemd-analyze', '--user', 'verify', *units], timeout=30)
             atomic_link(current, release.name)
             atomic_link(launcher, str(launcher_target))
             runner(['systemctl', '--user', 'daemon-reload'], timeout=30)

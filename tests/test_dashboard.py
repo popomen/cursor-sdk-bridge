@@ -365,7 +365,7 @@ class RestartTests(unittest.TestCase):
         spec = {**dashboard.INSTANCES[1], 'port': 2}
         return dashboard.Dashboard((spec,), health_reader=lambda port: health, unit_reader=lambda unit: None,
                                    connection_counter=lambda port: connections, restart_runner=runner,
-                                   ready_wait_s=0.2,
+                                   ready_wait_s=0.2, version_reader=lambda: None,
                                    admin_client=lambda port, action: {'draining': action == 'drain', 'unfinished': 0})
 
     def test_restart_waits_for_health_and_reports_when_it_does_not_return(self):
@@ -464,6 +464,7 @@ class HTTPTests(unittest.TestCase):
                                          claude_state=root / 'state.json', health_reader=lambda port: healths[port],
                                          unit_reader=lambda unit: UNIT, connection_counter=lambda port: 0,
                                          restart_runner=self.restarts.append, source_dir=root, ready_wait_s=0.2,
+                                         version_reader=lambda: None,
                                          admin_client=lambda port, action: {'draining': action == 'drain', 'unfinished': 0})
         self.server = dashboard.make_server(self.board, 0)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)

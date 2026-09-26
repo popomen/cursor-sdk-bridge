@@ -2,6 +2,8 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import shutil
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -113,6 +115,37 @@ class DeployTests(unittest.TestCase):
         self.assertEqual(len(list(self.units.iterdir())), 1)
         self.assertFalse((self.bin / 'cursor-bridge').is_symlink())
 
+    def test_invalid_units_restore_previous_selection_before_enabling(self):
+        self.root.mkdir()
+        (self.root / OLD).mkdir()
+        (self.root / 'current').symlink_to(OLD)
+        self.units.mkdir()
+        unit = self.units / deployment.unit_name('codex')
+        original = deployment.MANAGED + 'original unit\n'
+        unit.write_text(original)
+        self.runner.fail = lambda args: args[0] == 'systemd-analyze'
+        with self.assertRaises(deployment.DeploymentError):
+            self.deploy()
+        self.assertEqual((self.root / 'current').resolve(), self.root / OLD)
+        self.assertEqual(unit.read_text(), original)
+        self.assertFalse((self.bin / 'cursor-bridge').is_symlink())
+        self.assertFalse(any('enable' in args for args in self.runner.calls))
+
+    @unittest.skipUnless(shutil.which('systemd-analyze'), 'systemd-analyze is unavailable')
+    def test_real_systemd_parser_accepts_generated_units(self):
+        release = self.base / 'release with spaces %value'
+        executable = release / 'venv/bin/python'
+        executable.parent.mkdir(parents=True)
+        executable.symlink_to(sys.executable)
+        units = []
+        for instance in deployment.INSTANCES:
+            unit = self.base / deployment.unit_name(instance)
+            unit.write_text(deployment.unit_text(instance, self.base, release))
+            units.append(str(unit))
+        result = subprocess.run(['systemd-analyze', '--user', 'verify', *units],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_partial_enable_failure_removes_only_new_enabled_links(self):
         original_runner = self.runner
         self.units.mkdir()
@@ -151,6 +184,7 @@ class DeployTests(unittest.TestCase):
     def test_unit_paths_escape_systemd_specifiers_and_quotes(self):
         body = deployment.unit_text('codex', Path('/tmp/space here/%root'))
         self.assertIn('"/tmp/space here/%%root/current/venv/bin/python"', body)
+        self.assertIn('WorkingDirectory=/tmp/space here/%%root/current\n', body)
         self.assertIn('UnsetEnvironment=PYTHONPATH PYTHONHOME', body)
         with self.assertRaises(deployment.DeploymentError):
             deployment.unit_text('codex', Path('/tmp/new\nline'))
