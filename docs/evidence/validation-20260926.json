@@ -1,9 +1,9 @@
 {
-  "source_commit": "1eaebaa01c55d164b9418657c4639439eb8c7811",
+  "source_commit": "9b158865289809d03fd5e182e33bff1bf5cd2e7c",
   "command": "PYTHONDONTWRITEBYTECODE=1 ~/.codex/cursor-sdk2api/venv/bin/python -m unittest discover -s tests -p 'test_*.py'",
   "tests": 332,
   "passed": true,
-  "duration_s": 46.474,
+  "duration_s": 47.309,
   "modes_covered": [
     "legacy",
     "reuse",
@@ -21,5 +21,77 @@
     "existing_claude_session": "claude-session-recovery-20260926.json"
   },
   "codex_default_provider": "openai",
-  "codex_provider_scope": "The user switched the default to Cursor and restored OpenAI. The real new-task receipt explicitly selects Cursor without changing that restored default."
+  "codex_provider_scope": "The user switched the default to Cursor and restored OpenAI. The real new-task receipt explicitly selects Cursor without changing that restored default.",
+  "installed_package_validation": {
+    "distribution": "cursor-sdk-bridge",
+    "entrypoints": [
+      {
+        "name": "cursor-sdk-bridge",
+        "value": "cursor_sdk_bridge.cli:main"
+      }
+    ],
+    "assets_present": true,
+    "old_package_absent": true,
+    "cli_and_module_help_passed": true
+  },
+  "renamed_package_appserver_probe": {
+    "mode": "stub",
+    "model": "claude-opus-5-5-xhigh",
+    "passed": true,
+    "account_type": null,
+    "requires_openai_auth": false,
+    "model_catalog_verified": true,
+    "turn_status": "completed",
+    "sdk_generations": 2,
+    "synthetic_tool_calls": 1,
+    "namespace_and_call_id_verified": true,
+    "final_message_verified": true,
+    "appserver_stderr_lines_discarded": 0,
+    "request_shapes": [
+      {
+        "tool_types": {
+          "function": 8,
+          "namespace": 7
+        },
+        "input_types": {
+          "message": 3
+        }
+      },
+      {
+        "tool_types": {
+          "function": 8,
+          "namespace": 7
+        },
+        "input_types": {
+          "message": 3,
+          "function_call": 1,
+          "function_call_output": 1
+        }
+      }
+    ],
+    "auth_bytes_unchanged": true,
+    "real_sdk_generations": 0
+  },
+  "name_consistency": {
+    "distribution": "cursor-sdk-bridge",
+    "cli": "cursor-sdk-bridge",
+    "python_package": "cursor_sdk_bridge",
+    "deployment_root": "~/.local/share/cursor-sdk-bridge",
+    "operations_skill": "cursor-sdk-bridge-ops",
+    "legacy_name_matches": 0,
+    "source_and_tests": "Verified against the previous commit after only the declared identifier replacements; no inference logic changed."
+  },
+  "skill_validation": {
+    "quick_validate": "passed",
+    "repository_linter_errors": 0,
+    "existing_linter_warnings": 1,
+    "force_reload": true,
+    "discovered_enabled_byted_skills": [
+      "cc-bp-bg-ultra",
+      "cc-bp-bg-ultra-review",
+      "cursor-sdk-bridge-ops",
+      "devbox-seedreplay-handbook",
+      "i-have-adhd"
+    ]
+  }
 }
