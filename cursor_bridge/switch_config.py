@@ -129,6 +129,20 @@ def write_state(path, state):
     atomic(path, json.dumps(state, ensure_ascii=False, indent=2).encode())
 
 
+def retain_cursor_provider(document, baseline, state):
+    """Keep the bridge definition available to threads already bound to Cursor."""
+    path = ("model_providers", "cursor")
+    if get(baseline, path)["present"] or get(document, path)["present"]:
+        return False
+    source = state["installed"].get("model_providers.cursor", {"present": False})
+    if not source["present"]:
+        return False
+    # The current document can already be the restored baseline after a legacy
+    # interruption. The installed snapshot still owns the missing definition.
+    assign(document, path, source)
+    return True
+
+
 def finish_transaction(directory, state_path, state, expected_state=None):
     expected_state = read(state_path) if expected_state is None else expected_state
     if read(state_path) != expected_state:
@@ -224,13 +238,38 @@ def switch(directory, mode, port=8789, prepared=None):
         if legacy and mode != "openai":
             raise ValueError("legacy state must be recovered with openai first")
         if state and "transaction" in state and not legacy:
+            transaction = state["transaction"]
+            current = read(directory / "config.toml")
+            if current not in (decode(transaction["config.toml"]["before"]),
+                               decode(transaction["config.toml"]["after"])):
+                raise ValueError("interrupted switch conflicts with external changes")
+            upgraded = False
+            if transaction["mode"] == "openai":
+                baseline = tomlkit.parse((decode(state["original_config"]) or b"").decode())
+                restored = tomlkit.parse((decode(transaction["config.toml"]["after"]) or b"").decode())
+                if retain_cursor_provider(restored, baseline, state):
+                    after = tomlkit.dumps(restored).encode()
+                    tomllib.loads(after.decode())
+                    # Upgrade only a verified configuration transaction. Runtime
+                    # journals recover their original bytes before entering here.
+                    state = {**state, "transaction": {"mode": "openai", "config.toml": {
+                        "before": encode(current), "after": encode(after)}}}
+                    upgraded = True
+            staged = json.dumps(state, ensure_ascii=False, indent=2).encode() if upgraded else state_bytes
             if prepared:
                 final_state = dict(state)
                 transaction = final_state.pop('transaction')
                 packed = lambda value: json.dumps(value, ensure_ascii=False, indent=2).encode()
                 prepared({'config': decode(transaction['config.toml']['after']),
                           'state': packed(final_state) if transaction['mode'] == 'cursor' else None},
-                         state_bytes)
+                         staged)
+            if read(state_path) != state_bytes:
+                raise ValueError("interrupted switch state conflicts with external changes")
+            if read(directory / "config.toml") != current:
+                raise ValueError("configuration changed during switch preparation")
+            if upgraded:
+                write_state(state_path, state)
+                state_bytes = staged
             state = finish_transaction(directory, state_path, state, expected_state=state_bytes)
             state_bytes = read(state_path)
         config = read(directory / "config.toml")
@@ -265,6 +304,7 @@ def switch(directory, mode, port=8789, prepared=None):
                             value = value[part]
                         source["value"] = value
                     assign(document, path, source)
+                retain_cursor_provider(document, baseline, state)
                 # Remove only empty parent tables introduced by this switch.
                 for parent in ("features", "model_providers"):
                     if parent not in baseline and parent in document and not document[parent]:

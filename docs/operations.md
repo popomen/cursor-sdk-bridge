@@ -75,6 +75,12 @@ cursor-bridge switch codex restore --restart-daemon
 
 The command preserves OpenAI credentials, uses the existing transaction journal, validates synthetic namespace calls, and restarts only the verified idle daemon. A switch is successful only when `runtime_matches_config: true` and no transaction remains. The catalog must point into a deployed release. Never execute the daemon restart from its own active Codex task. Existing conversations retain their original provider.
 
+Restoring OpenAI keeps the bridge-created `[model_providers.cursor]` definition when the original configuration had none. If that table already existed, its original definition is restored. This lets stored Cursor threads still resolve their provider while new threads default to OpenAI. The original default model, model catalog, feature settings and credential policy are restored; retaining the provider definition does not migrate any conversation. Cursor threads still need the bridge service to answer requests.
+
+If a pre-existing `cursor` definition points to another backend, restoring it also routes Cursor-bound threads back to that backend. One provider ID cannot preserve both routes; check this before using an existing custom definition. A restore already completed by an older release may have removed both the definition and its backup; the retention rule cannot reconstruct that lost state.
+
+`Model provider cursor not found` means the effective provider registry cannot resolve a Cursor-bound thread. Check the loaded configuration and the thread's saved provider before changing anything. Do not rewrite thread history to hide the error. A successful default-provider switch alone does not prove that Desktop has reopened an old thread with its original model; verify those separately.
+
 ## Probes and rollback
 
 ```sh

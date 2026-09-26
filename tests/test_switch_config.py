@@ -23,6 +23,16 @@ trust_level = "trusted"
 '''
 AUTH = b'opaque-openai-auth-bytes\n'
 REFRESHED_AUTH = b'refreshed-or-new-login-auth\n'
+BRIDGE_PROVIDER = {
+    "name": "Cursor SDK", "base_url": "http://127.0.0.1:8789/v1",
+    "wire_api": "responses", "supports_websockets": False, "requires_openai_auth": False,
+}
+
+
+def restored_config(baseline=ORIGINAL, provider=None):
+    expected = tomllib.loads(baseline.decode() if isinstance(baseline, bytes) else baseline)
+    expected.setdefault("model_providers", {}).setdefault("cursor", provider or BRIDGE_PROVIDER)
+    return expected
 
 
 class SwitchTests(unittest.TestCase):
@@ -92,6 +102,190 @@ class SwitchTests(unittest.TestCase):
             switcher.switch(self.root, 'cursor')
         return old_root / 'assets/models.json'
 
+    def old_restore_transaction(self, *, config_after):
+        """A v2 restore journal written before provider retention was introduced."""
+        switcher.switch(self.root, "cursor")
+        state = json.loads(self.state.read_text())
+        before = self.config.read_bytes()
+        after = switcher.decode(state["original_config"])
+        state["transaction"] = {"mode": "openai", "config.toml": {
+            "before": switcher.encode(before), "after": switcher.encode(after)}}
+        self.state.write_text(json.dumps(state))
+        self.config.write_bytes(after if config_after else before)
+
+    def test_restore_retains_only_cursor_definition_beyond_the_original_settings(self):
+        self.change_config("model_catalog_json", "/original/catalog.json")
+        self.change_config("web_search", "live")
+        self.change_config("cli_auth_credentials_store", "keyring")
+        self.change_config("model_providers", {"other": {"name": "Other provider"}})
+        baseline = self.config.read_bytes()
+        stamp = self.auth_stamp()
+        switcher.switch(self.root, "cursor", port=18889)
+        provider = {**BRIDGE_PROVIDER, "base_url": "http://127.0.0.1:18889/v1"}
+        switcher.switch(self.root, "openai")
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config(baseline, provider))
+        self.assertEqual(self.auth_stamp(), stamp)
+        self.assertFalse(self.state.exists())
+
+    def test_restore_into_empty_baseline_keeps_provider_and_default_openai(self):
+        self.config.write_bytes(b"")
+        switcher.switch(self.root, "cursor")
+        switcher.switch(self.root, "openai")
+        self.assertEqual(tomllib.loads(self.config.read_text()), {"model_providers": {"cursor": BRIDGE_PROVIDER}})
+        self.assertEqual(switcher.status(self.root)["provider"], "openai")
+
+    def test_original_cursor_definition_is_restored_with_comments_and_nested_settings(self):
+        baseline = ORIGINAL + '''
+[model_providers.cursor] # original provider
+name = "Original Cursor"
+base_url = "http://127.0.0.1:18888/v1"
+wire_api = "responses"
+requires_openai_auth = true
+[model_providers.cursor.http_headers]
+X-Test = "original-header-value"
+'''
+        self.config.write_text(baseline)
+        switcher.switch(self.root, "cursor")
+        self.assertEqual(tomllib.loads(self.config.read_text())["model_providers"]["cursor"], BRIDGE_PROVIDER)
+        switcher.switch(self.root, "openai")
+        self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(baseline))
+        self.assertIn("# original provider", self.config.read_text())
+
+    def test_repeated_cycles_preserve_the_first_retained_definition(self):
+        for port in (8789, 18889, 28889):
+            with self.subTest(port=port):
+                switcher.switch(self.root, "cursor", port=port)
+                self.assertEqual(tomllib.loads(self.config.read_text())["model_providers"]["cursor"]["base_url"],
+                                 f"http://127.0.0.1:{port}/v1")
+                switcher.switch(self.root, "openai")
+                self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
+                restored = self.config.read_bytes()
+                switcher.switch(self.root, "openai")
+                self.assertEqual(self.config.read_bytes(), restored)
+
+    def test_removing_active_cursor_definition_is_an_external_conflict(self):
+        switcher.switch(self.root, "cursor")
+        self.change_config("model_providers", {})
+        before = self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()
+        with self.assertRaisesRegex(ValueError, "changed externally"):
+            switcher.switch(self.root, "openai")
+        self.assertEqual((self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()), before)
+
+    def test_old_restore_transaction_registers_upgrade_before_mutation(self):
+        for config_after in (False, True):
+            with self.subTest(config_after=config_after):
+                self.config.write_text(ORIGINAL)
+                self.old_restore_transaction(config_after=config_after)
+                before = self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()
+                prepared = []
+                def record(final, staging):
+                    self.assertEqual((self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()), before)
+                    prepared.append((final, staging))
+                switcher.switch(self.root, "openai", prepared=record)
+                self.assertEqual(len(prepared), 1)
+                final, staging = prepared[0]
+                transaction = json.loads(staging)["transaction"]["config.toml"]
+                self.assertEqual(switcher.decode(transaction["before"]), before[0])
+                self.assertEqual(switcher.decode(transaction["after"]), final["config"])
+                self.assertEqual(final, {"config": self.config.read_bytes(), "state": None})
+                self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
+                self.assertFalse(self.state.exists())
+                self.assertEqual(self.auth_stamp(), before[2])
+
+    def test_old_restore_upgrade_recovers_after_config_write_or_finalization_failure(self):
+        for config_after in (False, True):
+            for fail_config in (False, True):
+                with self.subTest(config_after=config_after, fail_config=fail_config):
+                    self.config.write_text(ORIGINAL)
+                    self.old_restore_transaction(config_after=config_after)
+                    before_config = self.config.read_bytes()
+                    atomic = switcher.atomic
+                    def fail(path, value):
+                        if (fail_config and path == self.config) or (not fail_config and path == self.state and value is None):
+                            raise OSError("simulated write failure")
+                        return atomic(path, value)
+                    with patch.object(switcher, "atomic", side_effect=fail):
+                        with self.assertRaises(OSError):
+                            switcher.switch(self.root, "openai")
+                    transaction = json.loads(self.state.read_text())["transaction"]["config.toml"]
+                    self.assertEqual(switcher.decode(transaction["before"]), before_config)
+                    self.assertEqual(tomllib.loads(switcher.decode(transaction["after"]).decode()), restored_config())
+                    self.auth.write_bytes(REFRESHED_AUTH)
+                    stamp = self.auth_stamp()
+                    switcher.switch(self.root, "openai")
+                    self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
+                    self.assertEqual(self.auth_stamp(), stamp)
+                    self.assertFalse(self.state.exists())
+
+    def test_old_restore_upgrade_refuses_preparation_edits_to_config_or_state(self):
+        for config_after in (False, True):
+            for target in (self.config, self.state):
+                with self.subTest(config_after=config_after, target=target.name):
+                    self.config.write_text(ORIGINAL)
+                    self.state.unlink(missing_ok=True)
+                    self.old_restore_transaction(config_after=config_after)
+                    before = self.config.read_bytes(), self.state.read_bytes()
+                    def edit(final, staging):
+                        target.write_bytes(target.read_bytes() + b"\n")
+                    with self.assertRaisesRegex(ValueError, "external changes|changed during switch preparation"):
+                        switcher.switch(self.root, "openai", prepared=edit)
+                    expected = list(before)
+                    expected[0 if target == self.config else 1] += b"\n"
+                    self.assertEqual((self.config.read_bytes(), self.state.read_bytes()), tuple(expected))
+        self.assertEqual(self.auth.read_bytes(), AUTH)
+
+    def test_old_restore_upgrade_refuses_unowned_config_before_preparation(self):
+        self.old_restore_transaction(config_after=True)
+        self.config.write_bytes(self.config.read_bytes() + b"# external edit\n")
+        before = self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()
+        with patch.object(switcher, "write_state") as write, self.assertRaisesRegex(ValueError, "external changes"):
+            switcher.switch(self.root, "openai", prepared=lambda *_: self.fail("must validate before preparation"))
+        write.assert_not_called()
+        self.assertEqual((self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()), before)
+
+    def test_old_restore_upgrade_state_write_failure_leaves_original_owned_bytes(self):
+        self.old_restore_transaction(config_after=True)
+        before = self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()
+        prepared = []
+        with patch.object(switcher, "write_state", side_effect=OSError("simulated journal failure")):
+            with self.assertRaises(OSError):
+                switcher.switch(self.root, "openai", prepared=lambda *values: prepared.append(values))
+        self.assertEqual(len(prepared), 1)
+        self.assertEqual((self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()), before)
+        switcher.switch(self.root, "openai")
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
+
+    def test_current_restore_transaction_reuses_its_exact_staged_bytes(self):
+        switcher.switch(self.root, "cursor")
+        self.fail_first_config_write("openai")
+        # Ownership includes serialization, not just the parsed state values.
+        self.state.write_text(json.dumps(json.loads(self.state.read_text()), separators=(",", ":")) + "\n")
+        staged = self.state.read_bytes()
+        prepared = []
+        with patch.object(switcher, "write_state") as write:
+            switcher.switch(self.root, "openai", prepared=lambda *values: prepared.append(values))
+        write.assert_not_called()
+        self.assertEqual(prepared, [({"config": self.config.read_bytes(), "state": None}, staged)])
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
+
+    def test_legacy_missing_table_uses_installed_snapshot_and_prepares_before_writes(self):
+        self.legacy_state(auth_present=True, transaction_mode="openai", config_after=True)
+        self.assertNotIn("model_providers", tomllib.loads(self.config.read_text()))
+        state = json.loads(self.state.read_text())
+        provider = {**BRIDGE_PROVIDER, "base_url": "http://127.0.0.1:18889/v1"}
+        state["installed"]["model_providers.cursor"]["value"] = provider
+        self.state.write_text(json.dumps(state))
+        before = self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()
+        prepared = []
+        def record(final, staging):
+            self.assertEqual((self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()), before)
+            prepared.append((final, staging))
+        switcher.switch(self.root, "openai", prepared=record)
+        self.assertEqual(len(prepared), 1)
+        self.assertEqual(prepared[0][0], {"config": self.config.read_bytes(), "state": None})
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config(provider=provider))
+        self.assertEqual(self.auth_stamp(), before[2])
+
     def test_catalog_upgrade_status_is_readonly_and_gives_independent_terminal_command(self):
         old = self.install_old_catalog()
         before = self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()
@@ -135,7 +329,7 @@ class SwitchTests(unittest.TestCase):
         switcher.switch(self.root, 'openai')
         restored = tomllib.loads(self.config.read_text())
         self.assertEqual(restored.pop('unrelated_setting'), 'preserved')
-        self.assertEqual(restored, tomllib.loads(ORIGINAL))
+        self.assertEqual(restored, restored_config())
         self.assertEqual(self.auth_stamp(), stamp)
 
     def test_interrupted_catalog_upgrade_recovers_before_config_write(self):
@@ -198,7 +392,7 @@ class SwitchTests(unittest.TestCase):
         self.assertNotIn(switcher.encode(AUTH), self.state.read_text())
         self.config.write_text(self.config.read_text().replace('trust_level = "trusted"', 'trust_level = "untrusted"'))
         switcher.switch(self.root, "openai")
-        expected = tomllib.loads(ORIGINAL.replace('trust_level = "trusted"', 'trust_level = "untrusted"'))
+        expected = restored_config(ORIGINAL.replace('trust_level = "trusted"', 'trust_level = "untrusted"'))
         self.assertEqual(tomllib.loads(self.config.read_text()), expected)
         self.assertIn("# user comment", self.config.read_text())
         self.assertIn("# keep this comment", self.config.read_text())
@@ -277,7 +471,7 @@ class SwitchTests(unittest.TestCase):
             self.assertFalse(switcher.status(self.root)["managed_config_conflict"])
             switcher.switch(self.root, "cursor")
             switcher.switch(self.root, "openai")
-            self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(ORIGINAL))
+            self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
 
     def test_managed_configuration_conflict_preserves_both_sides(self):
         switcher.switch(self.root, "cursor")
@@ -296,7 +490,7 @@ class SwitchTests(unittest.TestCase):
         self.assertEqual(set(transaction), {"mode", "config.toml"})
         self.auth.write_bytes(REFRESHED_AUTH)
         switcher.switch(self.root, "openai")
-        self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(ORIGINAL))
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
         self.assertEqual(self.auth.read_bytes(), REFRESHED_AUTH)
         self.assertFalse(self.state.exists())
 
@@ -319,14 +513,14 @@ class SwitchTests(unittest.TestCase):
         self.assertNotIn("transaction", json.loads(self.state.read_text()))
         self.assertEqual(self.auth.read_bytes(), REFRESHED_AUTH)
         switcher.switch(self.root, "openai")
-        self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(ORIGINAL))
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
 
     def test_restore_transaction_recovery_preserves_refreshed_auth(self):
         switcher.switch(self.root, "cursor")
         self.fail_first_config_write("openai")
         self.auth.write_bytes(REFRESHED_AUTH)
         switcher.switch(self.root, "openai")
-        self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(ORIGINAL))
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
         self.assertEqual(self.auth.read_bytes(), REFRESHED_AUTH)
         self.assertFalse(self.state.exists())
 
@@ -344,7 +538,7 @@ class SwitchTests(unittest.TestCase):
         self.change_config("cli_auth_credentials_store", "auto")
         baseline = self.legacy_state()
         switcher.switch(self.root, "openai")
-        self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(baseline.decode()))
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config(baseline))
         self.assertEqual(self.auth.read_bytes(), AUTH)
         self.assertEqual(self.auth.stat().st_mode & 0o777, 0o600)
         self.assertFalse(self.state.exists())
@@ -354,7 +548,7 @@ class SwitchTests(unittest.TestCase):
         self.auth.write_bytes(REFRESHED_AUTH)
         auth_stat = self.auth_stamp()
         switcher.switch(self.root, "openai")
-        self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(baseline.decode()))
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config(baseline))
         self.assertEqual(self.auth.read_bytes(), REFRESHED_AUTH)
         self.assertEqual(self.auth_stamp(), auth_stat)
 
@@ -386,7 +580,7 @@ class SwitchTests(unittest.TestCase):
                         if auth_present:
                             self.auth.write_bytes(REFRESHED_AUTH)
                         switcher.switch(self.root, "openai")
-                        self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(baseline.decode()))
+                        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config(baseline))
                         self.assertEqual(self.auth.read_bytes(), REFRESHED_AUTH if auth_present else AUTH)
                         self.assertFalse(self.state.exists())
 
@@ -408,7 +602,7 @@ class SwitchTests(unittest.TestCase):
         self.auth.write_bytes(REFRESHED_AUTH)
         switcher.switch(self.root, "openai")
         self.assertEqual(self.auth.read_bytes(), REFRESHED_AUTH)
-        self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(baseline.decode()))
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config(baseline))
 
     def test_status_is_readonly_and_reports_preservation(self):
         before = sorted(self.root.iterdir())

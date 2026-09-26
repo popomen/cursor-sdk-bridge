@@ -213,10 +213,13 @@ class RuntimeSwitchIncidentTests(unittest.TestCase):
         self.assertFalse(self.journal.exists())
         self.assertTrue((self.directory / 'cursor-fallback-state/state.json').exists())
         self.assert_auth_preserved()
+        cursor_provider = tomllib.loads((self.directory / 'config.toml').read_text())['model_providers']['cursor']
         restored = self.apply('openai')
         self.assertNotEqual(restored['pid'], cursor['pid'])
         self.assertEqual(restored['config']['model_provider'], 'openai')
-        self.assertEqual(tomllib.loads((self.directory / 'config.toml').read_text()), tomllib.loads(self.original.decode()))
+        restored_config = tomllib.loads((self.directory / 'config.toml').read_text())
+        self.assertEqual(restored_config.pop('model_providers'), {'cursor': cursor_provider})
+        self.assertEqual(restored_config, tomllib.loads(self.original.decode()))
         self.assertTrue((self.directory / 'config.toml').read_bytes().startswith(b'# fixture configuration\n'))
         self.assertFalse(self.journal.exists())
         self.assertFalse((self.directory / 'cursor-fallback-state/state.json').exists())
@@ -224,6 +227,22 @@ class RuntimeSwitchIncidentTests(unittest.TestCase):
         audit = json.loads((self.directory / 'cursor-fallback-state/last-switch.json').read_text())
         self.assertEqual(audit['result'], 'runtime_verified')
         self.assertEqual(audit['pid'], restored['pid'])
+
+    def test_failed_restore_rolls_back_cursor_registry_and_state_exactly(self):
+        self.apply('cursor')
+        before = self.old_cursor_files()
+        self.runtime.actions = ['fail', 'ok']
+        with self.assertRaisesRegex(ar.RuntimeBlocked, 'Previous mode was restored'):
+            self.apply('openai')
+        self.assertEqual(self.old_cursor_files(), before)
+        self.assertEqual(self.runtime.live['config']['model_provider'], 'cursor')
+        self.assertFalse(self.journal.exists())
+        restored = self.apply('openai')
+        self.assertEqual(restored['config']['model_provider'], 'openai')
+        config = tomllib.loads((self.directory / 'config.toml').read_text())
+        self.assertEqual(config['model_providers']['cursor'],
+                         tomllib.loads(before[0].decode())['model_providers']['cursor'])
+        self.assert_auth_preserved()
 
     def test_requires_explicit_restart_before_any_mutation(self):
         with self.assertRaises(ar.RuntimeBlocked):
