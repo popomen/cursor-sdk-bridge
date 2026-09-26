@@ -17,6 +17,7 @@ from cursor_bridge.anthropic_protocol import (ERROR_TYPES, complete_message, err
 from cursor_bridge.failures import InvalidModelOutput, PromptTooLarge, RequestTimeout, error_code, failure_label
 from cursor_bridge.request_log import REQUEST_STATS, RequestLog
 from cursor_bridge.ledger import ResultLedger, request_digest
+from cursor_bridge.live_output import LiveOutput, MessagesLive, ResponsesLive
 from cursor_bridge.responses_protocol import (InvalidRequest, MODELS, complete_response, completion_events,
                                 prepare_request, response_shell, strict_json)
 
@@ -76,7 +77,7 @@ class Service:
         history, prompt, images = prepare_request(body, previous)
         return response_shell(body["model"]), history, prompt, images
 
-    async def _generate(self, shell, body, history, prompt, stats=None, images=()):
+    async def _generate(self, shell, body, history, prompt, stats=None, images=(), live=None):
         REQUEST_STATS.set(stats)
         scope = asyncio.timeout(self.deadline(body["model"]))
         try:
@@ -85,7 +86,8 @@ class Service:
                 extra = {"images": images} if images else {}
                 generate_request = getattr(self.backend, "generate_request", None)
                 if generate_request:
-                    text = await generate_request(body["model"], prompt, body, history, **extra)
+                    text = await generate_request(body["model"], prompt, body, history,
+                                                  on_event=live.append if live else None, **extra)
                 else:
                     text = await self.backend.generate(body["model"], prompt, **extra)
         except TimeoutError:
@@ -95,7 +97,17 @@ class Service:
         try:
             response = complete_response(shell, text, body, history)
         except Exception:
+            discard = getattr(self.backend, "discard_response", None)
+            if discard:
+                discard(getattr(text, "reuse_token", None))
             raise InvalidModelOutput() from None
+        if live is not None and self.mode == "native":
+            response = live.finalize(response)
+        usage = stats.get("usage") if stats else None
+        if usage:
+            response["usage"] = {"input_tokens": usage["input_tokens"], "output_tokens": usage["output_tokens"],
+                                 "total_tokens": usage["input_tokens"] + usage["output_tokens"],
+                                 "input_tokens_details": {"cached_tokens": usage["cache_read_tokens"]}}
         commit = getattr(self.backend, "commit_response", None)
         if commit:
             commit(history, body, response, getattr(text, "reuse_token", None))
@@ -112,11 +124,11 @@ class Service:
                 while len(self.cache) > 32 or sum(v[2] for v in self.cache.values()) > MAX_CACHE_BYTES:
                     self.cache.popitem(last=False)
 
-    async def _run_job(self, digest, shell, body, history, prompt, stats, images):
+    async def _run_job(self, digest, shell, body, history, prompt, stats, images, live):
         began = time.monotonic()
         outcome = "completed"
         try:
-            result = await self._generate(shell, body, history, prompt, stats, images)
+            result = await self._generate(shell, body, history, prompt, stats, images, live)
             if self.ledger:
                 self.ledger.put(digest, result, stats)
             return result
@@ -161,8 +173,10 @@ class Service:
                 raise RuntimeError("inference queue is full")
             # Keep separate jobs in fixtures/explicit no-ledger mode.
             key = digest if self.ledger else shell["id"]
+            live = LiveOutput()
             future = asyncio.run_coroutine_threadsafe(
-                self._run_job(digest, shell, body, history, prompt, stats, images), self.loop)
+                self._run_job(digest, shell, body, history, prompt, stats, images, live), self.loop)
+            future.live_output = live
             self.jobs[key] = (future, dict(shell), stats)
             def finished(done):
                 with self.submit_lock:
@@ -315,13 +329,11 @@ class Handler(BaseHTTPRequestHandler):
                 emit("response.in_progress", {"response": shell})
             if entry["prompt_bytes"] > service.max_prompt_bytes:
                 raise PromptTooLarge()
-            # SSE comments do not reset the Codex stream idle timer; data events do.
-            while not concurrent.futures.wait([future], timeout=KEEPALIVE_SECONDS).done:
-                if streaming:
-                    emit("response.in_progress", {"response": shell})
-            result = future.result()
+            live = ResponsesLive(emit) if streaming else None
+            result, streamed_items = self._wait_inference(future, live,
+                lambda: emit("response.in_progress", {"response": shell}))
             if streaming:
-                for kind, fields in completion_events(result):
+                for kind, fields in completion_events(result, start_index=streamed_items):
                     emit(kind, fields)
             else:
                 self._json(200, result)
@@ -345,6 +357,32 @@ class Handler(BaseHTTPRequestHandler):
             service.record(**entry, **stats, outcome=outcome, duration_s=round(time.monotonic() - began, 3),
                            bridge_launches=getattr(service.backend, "launches", None))
 
+    def _wait_inference(self, future, live, keepalive):
+        buffer = getattr(future, "live_output", None)
+        cursor, count = 0, 0
+        heartbeat = time.monotonic() + KEEPALIVE_SECONDS
+        while True:
+            if live and buffer:
+                cursor, events = buffer.read(cursor)
+                for event in events:
+                    live.delta(event)
+                    count = max(count, event["index"] + 1)
+            if future.done():
+                # A producer can finish between the read and done check.
+                if live and buffer:
+                    cursor, events = buffer.read(cursor)
+                    for event in events:
+                        live.delta(event)
+                        count = max(count, event["index"] + 1)
+                result = future.result()
+                if live:
+                    live.close_item()
+                return result, count
+            concurrent.futures.wait([future], timeout=min(.05, KEEPALIVE_SECONDS))
+            if live and time.monotonic() >= heartbeat:
+                keepalive()
+                heartbeat = time.monotonic() + KEEPALIVE_SECONDS
+
     def _messages(self, service, body, request, history, prompt, images, entry, began):
         message, streaming = message_shell(body["model"]), entry["stream"]
         future, started, outcome, stats = None, False, "completed", {}
@@ -366,12 +404,11 @@ class Handler(BaseHTTPRequestHandler):
                 started = True
                 emit("message_start", {"type": "message_start", "message": message})
             future = service.submit(response_shell(body["model"]), request, history, prompt, stats, images)
-            while not concurrent.futures.wait([future], timeout=KEEPALIVE_SECONDS).done:
-                if streaming:
-                    emit("ping", {"type": "ping"})
-            result = complete_message(message, future.result(), stats.get("usage"))
+            response, streamed_items = self._wait_inference(future, MessagesLive(emit) if streaming else None,
+                lambda: emit("ping", {"type": "ping"}))
+            result = complete_message(message, response, stats.get("usage"))
             if streaming:
-                for kind, data in stream_events(result):
+                for kind, data in stream_events(result, start_index=streamed_items):
                     emit(kind, data)
             else:
                 self._json(200, result)

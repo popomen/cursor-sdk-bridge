@@ -364,9 +364,18 @@ def complete_response(shell, text, body, history):
     return {**shell, "status": "completed", "output": output}
 
 
-def completion_events(response):
+def completion_events(response, start_index=0):
     """Yield events after created/in_progress; deltas contain only validated output."""
-    for index, item in enumerate(response["output"]):
+    for index, item in enumerate(response["output"][start_index:], start_index):
+        if item["type"] == "reasoning":
+            from cursor_bridge.live_output import ResponsesLive
+            buffered = []
+            emitter = ResponsesLive(lambda kind, fields: buffered.append((kind, fields)))
+            for part in item["summary"]:
+                emitter.delta({"index": index, "id": item["id"], "type": "reasoning", "text": part["text"]})
+            emitter.close_item()
+            yield from buffered
+            continue
         added = copy.deepcopy(item)
         added["status"] = "in_progress"
         if item["type"] == "message":

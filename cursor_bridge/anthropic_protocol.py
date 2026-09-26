@@ -1,4 +1,5 @@
 """Anthropic Messages translation onto the strict Responses core. This module never executes tools."""
+import hashlib
 import json
 import uuid
 
@@ -150,18 +151,24 @@ def complete_message(shell, response, usage=None):
     for item in response["output"]:
         if item["type"] == "message":
             content.append({"type": "text", "text": item["content"][0]["text"]})
+        elif item["type"] == "reasoning":
+            content.append({"type": "thinking", "thinking": "".join(part["text"] for part in item["summary"]), "signature": ""})
         else:
-            content.append({"type": "tool_use", "id": "toolu_" + uuid.uuid4().hex[:24], "name": item["name"],
+            call_id = item["call_id"]
+            public_id = call_id if call_id.startswith("toolu_") else "toolu_" + hashlib.sha256(call_id.encode()).hexdigest()[:24]
+            content.append({"type": "tool_use", "id": public_id, "name": item["name"],
                             "input": json.loads(item["arguments"])})
     calls = any(block["type"] == "tool_use" for block in content)
     return {**shell, "content": content, "stop_reason": "tool_use" if calls else "end_turn", "usage": usage_block(usage)}
 
 
-def stream_events(message, chunk=256):
+def stream_events(message, chunk=256, start_index=0):
     """Yield the events after message_start; deltas contain only validated output."""
-    for index, block in enumerate(message["content"]):
+    for index, block in enumerate(message["content"][start_index:], start_index):
         if block["type"] == "text":
             start, delta, field, value = {"type": "text", "text": ""}, "text_delta", "text", block["text"]
+        elif block["type"] == "thinking":
+            start, delta, field, value = {"type": "thinking", "thinking": "", "signature": ""}, "thinking_delta", "thinking", block["thinking"]
         else:
             start, delta, field = {**block, "input": {}}, "input_json_delta", "partial_json"
             value = json.dumps(block["input"], ensure_ascii=False)
@@ -169,6 +176,8 @@ def stream_events(message, chunk=256):
         for offset in range(0, len(value), chunk):
             yield "content_block_delta", {"type": "content_block_delta", "index": index,
                                           "delta": {"type": delta, field: value[offset:offset + chunk]}}
+        if block["type"] == "thinking":
+            yield "content_block_delta", {"type": "content_block_delta", "index": index, "delta": {"type": "signature_delta", "signature": ""}}
         yield "content_block_stop", {"type": "content_block_stop", "index": index}
     yield "message_delta", {"type": "message_delta", "usage": message["usage"],
                             "delta": {"stop_reason": message["stop_reason"], "stop_sequence": None}}
