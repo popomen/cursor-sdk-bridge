@@ -1,0 +1,106 @@
+{
+  "models": [
+    {
+      "slug": "claude-opus-5-5-high",
+      "display_name": "Opus 5.5 high",
+      "description": "Cursor SDK Opus 5.5 high",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "high",
+          "description": "high"
+        }
+      ],
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 0,
+      "shell_type": "unified_exec",
+      "support_verbosity": false,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "base_instructions": "You are a coding assistant. Use only tools provided in the request.",
+      "apply_patch_tool_type": null,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "tool_mode": "",
+      "service_tiers": [],
+      "additional_speed_tiers": [],
+      "use_responses_lite": false,
+      "multi_agent_version": "disabled",
+      "supports_search_tool": false
+    },
+    {
+      "slug": "claude-opus-5-5-xhigh",
+      "display_name": "Opus 5.5 xhigh",
+      "description": "Cursor SDK Opus 5.5 xhigh",
+      "default_reasoning_level": "xhigh",
+      "supported_reasoning_levels": [
+        {
+          "effort": "xhigh",
+          "description": "xhigh"
+        }
+      ],
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 1,
+      "shell_type": "unified_exec",
+      "support_verbosity": false,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "base_instructions": "You are a coding assistant. Use only tools provided in the request.",
+      "apply_patch_tool_type": null,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "tool_mode": "",
+      "service_tiers": [],
+      "additional_speed_tiers": [],
+      "use_responses_lite": false,
+      "multi_agent_version": "disabled",
+      "supports_search_tool": false
+    },
+    {
+      "slug": "claude-opus-5-5-max",
+      "display_name": "Opus 5.5 max",
+      "description": "Cursor SDK Opus 5.5 max",
+      "default_reasoning_level": "max",
+      "supported_reasoning_levels": [
+        {
+          "effort": "max",
+          "description": "max"
+        }
+      ],
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 2,
+      "shell_type": "unified_exec",
+      "support_verbosity": false,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "base_instructions": "You are a coding assistant. Use only tools provided in the request.",
+      "apply_patch_tool_type": null,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "tool_mode": "",
+      "service_tiers": [],
+      "additional_speed_tiers": [],
+      "use_responses_lite": false,
+      "multi_agent_version": "disabled",
+      "supports_search_tool": false
+    }
+  ]
+}
