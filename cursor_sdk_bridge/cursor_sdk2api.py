@@ -12,13 +12,13 @@ from pathlib import Path
 import threading
 import time
 
-from cursor_bridge.anthropic_protocol import (ERROR_TYPES, complete_message, error_body, estimate_tokens, failure_error,
+from cursor_sdk_bridge.anthropic_protocol import (ERROR_TYPES, complete_message, error_body, estimate_tokens, failure_error,
                                 message_shell, prepare_messages, stream_events)
-from cursor_bridge.failures import InvalidModelOutput, NativeProtocolError, PromptTooLarge, RequestTimeout, error_code, failure_label
-from cursor_bridge.request_log import REQUEST_STATS, RequestLog
-from cursor_bridge.ledger import ResultLedger, request_digest
-from cursor_bridge.live_output import LiveOutput, MessagesLive, ResponsesLive
-from cursor_bridge.responses_protocol import (InvalidRequest, MODELS, complete_response, completion_events,
+from cursor_sdk_bridge.failures import InvalidModelOutput, NativeProtocolError, PromptTooLarge, RequestTimeout, error_code, failure_label
+from cursor_sdk_bridge.request_log import REQUEST_STATS, RequestLog
+from cursor_sdk_bridge.ledger import ResultLedger, request_digest
+from cursor_sdk_bridge.live_output import LiveOutput, MessagesLive, ResponsesLive
+from cursor_sdk_bridge.responses_protocol import (InvalidRequest, MODELS, complete_response, completion_events,
                                 prepare_request, response_shell, strict_json)
 
 MAX_BODY = 64 * 1024 * 1024
@@ -261,7 +261,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/health":
             backend = self.server.service.backend
             progress, limits = getattr(backend, "progress", None), getattr(backend, "limits", None)
-            from cursor_bridge.version import running_version
+            from cursor_sdk_bridge.version import running_version
             extra_capabilities = ["native_tools", "live_deltas"] if self.server.service.mode == "native" else []
             if self.server.service.ledger:
                 extra_capabilities += ["durable_dedup", "disconnect_continuation"]
@@ -471,7 +471,7 @@ def make_server(service, port=8789):
 
 
 def main():
-    from cursor_bridge.sdk_backend import DEFAULT_QUEUE_TIMEOUT, DEFAULT_TIMEOUTS, SDKBackend
+    from cursor_sdk_bridge.sdk_backend import DEFAULT_QUEUE_TIMEOUT, DEFAULT_TIMEOUTS, SDKBackend
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8789)
@@ -507,10 +507,10 @@ def main():
     os.umask(0o077)
     backend_type = SDKBackend
     if args.mode == "reuse":
-        from cursor_bridge.reuse_backend import ReuseSDKBackend
+        from cursor_sdk_bridge.reuse_backend import ReuseSDKBackend
         backend_type = ReuseSDKBackend
     elif args.mode == "native":
-        from cursor_bridge.native_backend import NativeSDKBackend
+        from cursor_sdk_bridge.native_backend import NativeSDKBackend
         backend_type = NativeSDKBackend
     if not 0 < args.pending_timeout <= MAX_TIMEOUT or args.dedup_ttl <= 0:
         parser.error("pending timeout must be positive and at most 1800; dedup TTL must be positive")

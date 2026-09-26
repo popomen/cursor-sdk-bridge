@@ -17,15 +17,15 @@ import uuid
 
 from jsonschema import Draft202012Validator
 
-from cursor_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete
-from cursor_bridge.request_log import REQUEST_STATS
-from cursor_bridge.responses_protocol import (
+from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete
+from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.responses_protocol import (
     ATTACHED_IMAGE, IMAGE_NOTE, MAX_ATTACHED_IMAGES, MODELS, OMITTED_IMAGE,
     InvalidRequest, decode_image, image_parts, normalize_choice, normalize_tools, qualified_name,
 )
-from cursor_bridge.reuse_backend import GeneratedText, canonical_history, policy_digest, _chain, _digest, _latest_input
-from cursor_bridge.sdk_backend import SDKBackend, USAGE_FIELDS
-from cursor_bridge.sdk_support import model_identity, snapshot
+from cursor_sdk_bridge.reuse_backend import GeneratedText, canonical_history, policy_digest, _chain, _digest, _latest_input
+from cursor_sdk_bridge.sdk_backend import SDKBackend, USAGE_FIELDS
+from cursor_sdk_bridge.sdk_support import model_identity, snapshot
 
 
 _RECOVERY_REBUILD = contextvars.ContextVar("native_recovery_rebuild", default=False)

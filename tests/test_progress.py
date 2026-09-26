@@ -7,10 +7,10 @@ import threading
 from types import SimpleNamespace
 import unittest
 
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.failures import DeadlineExpired, QueueTimeout
-from cursor_bridge.sdk_backend import SDKBackend
-from cursor_bridge.switch_config import service_report
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.failures import DeadlineExpired, QueueTimeout
+from cursor_sdk_bridge.sdk_backend import SDKBackend
+from cursor_sdk_bridge.switch_config import service_report
 from test_cursor_sdk2api import StubSDK
 from test_sdk_backend import StubClient
 

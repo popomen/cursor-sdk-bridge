@@ -6,21 +6,21 @@ from pathlib import Path
 import sys
 import tomllib
 
-from cursor_bridge import version
+from cursor_sdk_bridge import version
 
 
 def invoke(module, arguments):
     previous = sys.argv
     try:
-        sys.argv = ['cursor-bridge'] + list(arguments)
+        sys.argv = ['cursor-sdk-bridge'] + list(arguments)
         return module.main()
     finally:
         sys.argv = previous
 
 
 def status():
-    from cursor_bridge import dashboard, switch_config
-    from cursor_bridge.appserver_runtime import DesktopRuntime
+    from cursor_sdk_bridge import dashboard, switch_config
+    from cursor_sdk_bridge.appserver_runtime import DesktopRuntime
     codex_dir = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))
     result = dashboard.Dashboard().snapshot()
     result.update(running_version=version.running_version(), deployed_version=version.deployed_version())
@@ -39,9 +39,9 @@ def status():
 def serve(arguments):
     instance = arguments.pop(0) if arguments and arguments[0] in ('codex', 'claude', 'dashboard') else 'codex'
     if instance == 'dashboard':
-        from cursor_bridge import dashboard
+        from cursor_sdk_bridge import dashboard
         return invoke(dashboard, arguments)
-    from cursor_bridge import cursor_sdk2api
+    from cursor_sdk_bridge import cursor_sdk2api
     defaults = []
     if instance == 'claude':
         defaults = ['--port', '8790', '--state-dir', str(Path.home() / '.codex/cursor-sdk2api-claude'),
@@ -66,20 +66,20 @@ def main(argv=None):
     if command == 'serve':
         return serve(rest)
     if command == 'probe':
-        from cursor_bridge import probe_service
+        from cursor_sdk_bridge import probe_service
         if not any(arg in ('-h', '--help') for arg in rest):
             print('Probe uses 1–2 real SDK outputs (usually 1–2 minutes at high; consumes Cursor quota).', file=sys.stderr)
         return invoke(probe_service, rest)
     if command == 'switch':
-        switch_parser = argparse.ArgumentParser(prog='cursor-bridge switch')
+        switch_parser = argparse.ArgumentParser(prog='cursor-sdk-bridge switch')
         switch_parser.add_argument('client', choices=('codex', 'claude'))
         switch_parser.add_argument('mode', choices=('cursor', 'restore'))
         selected, extra = switch_parser.parse_known_args(rest)
         if selected.client == 'codex':
-            from cursor_bridge import switch_config as module
+            from cursor_sdk_bridge import switch_config as module
             mode = 'openai' if selected.mode == 'restore' else selected.mode
         else:
-            from cursor_bridge import claude_switch as module
+            from cursor_sdk_bridge import claude_switch as module
             mode = selected.mode
         if mode == 'cursor' and not any(arg in ('-h', '--help') for arg in extra):
             print('Switch preflight may use 2 real SDK outputs (usually 1–2 minutes at high).', file=sys.stderr)
@@ -88,12 +88,12 @@ def main(argv=None):
         parser.parse_args(arguments)
         print(json.dumps(status(), ensure_ascii=False))
         return
-    from cursor_bridge import deployment
+    from cursor_sdk_bridge import deployment
     if command == 'restart':
-        restart_parser = argparse.ArgumentParser(prog='cursor-bridge restart')
+        restart_parser = argparse.ArgumentParser(prog='cursor-sdk-bridge restart')
         restart_parser.add_argument('instance', choices=deployment.INSTANCES)
         selected = restart_parser.parse_args(rest)
-        from cursor_bridge import dashboard
+        from cursor_sdk_bridge import dashboard
         if selected.instance == 'dashboard':
             error = dashboard.run_restart(deployment.unit_name('dashboard'))
             result = {'instance': 'dashboard', 'result': 'failed' if error else 'restarted', 'message': error}
@@ -103,7 +103,7 @@ def main(argv=None):
         if result['result'] != 'restarted':
             raise SystemExit(1)
         return
-    deploy_parser = argparse.ArgumentParser(prog='cursor-bridge deploy')
+    deploy_parser = argparse.ArgumentParser(prog='cursor-sdk-bridge deploy')
     deploy_parser.add_argument('commit', nargs='?', default='HEAD')
     deploy_parser.add_argument('--repo', type=Path, default=Path.cwd())
     deploy_parser.add_argument('--root', type=Path)

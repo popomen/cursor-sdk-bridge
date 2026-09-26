@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 import urllib.error
 
-from cursor_bridge import probe_comparison as probe
+from cursor_sdk_bridge import probe_comparison as probe
 
 
 LEGACY = "http://127.0.0.1:18789"

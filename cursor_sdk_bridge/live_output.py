@@ -3,7 +3,7 @@ import copy
 import threading
 import uuid
 
-from cursor_bridge.failures import UpstreamIncomplete
+from cursor_sdk_bridge.failures import UpstreamIncomplete
 
 
 class LiveOutput:

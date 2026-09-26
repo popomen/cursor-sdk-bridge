@@ -11,8 +11,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.ledger import ResultLedger, request_digest
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.ledger import ResultLedger, request_digest
 
 MODEL = "claude-opus-5-5-high"
 BODY = {"model": MODEL, "input": "synthetic private input"}
@@ -140,7 +140,7 @@ class DetachedTests(unittest.TestCase):
     def test_http_disconnect_does_not_cancel_and_result_is_retrievable(self):
         body = {**BODY, "stream": True}
         wire = json.dumps(body).encode()
-        with patch("cursor_bridge.cursor_sdk2api.KEEPALIVE_SECONDS", .01):
+        with patch("cursor_sdk_bridge.cursor_sdk2api.KEEPALIVE_SECONDS", .01):
             connection = socket.create_connection(("127.0.0.1", self.server.server_port))
             connection.sendall(b"POST /v1/responses HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: "
                                + str(len(wire)).encode() + b"\r\n\r\n" + wire)

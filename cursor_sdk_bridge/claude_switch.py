@@ -15,7 +15,7 @@ import stat
 import tempfile
 import urllib.request
 
-from cursor_bridge.probe_service import ProbeFailed, probe_messages
+from cursor_sdk_bridge.probe_service import ProbeFailed, probe_messages
 
 SERVICE_MODELS = [f"claude-opus-5-5-{effort}" for effort in ("high", "xhigh", "max")]
 # Claude Code plans a 200k window for claude-* names it does not know; [1m] makes it plan for 1M. It strips
@@ -187,7 +187,7 @@ def verify_service(port):
         health, listing = fetch(port, "/health"), fetch(port, "/v1/models")
     except Exception as exc:
         raise ServiceNotReady(f"No adapter answers on 127.0.0.1:{port} ({type(exc).__name__}); start "
-                              "cursor-bridge-claude.service first. Settings were not changed.") from None
+                              "cursor-sdk-bridge-claude.service first. Settings were not changed.") from None
     if (not isinstance(health, dict) or health.get("service") != "cursor-sdk2api"
             or "anthropic_messages" not in (health.get("capabilities") or [])):
         raise ServiceNotReady(f"127.0.0.1:{port} does not serve Anthropic Messages; restart it with the current "
@@ -213,7 +213,7 @@ def service_report(port):
         report["limits"] = limits
     deadlines = limits.get("deadlines") if isinstance(limits.get("deadlines"), dict) else {}
     if deadlines.get("max") != MAX_DEADLINE_S or limits.get("queue_timeout") != QUEUE_TIMEOUT_S:
-        report["next_step"] = ("When idle, run cursor-bridge restart claude so the max "
+        report["next_step"] = ("When idle, run cursor-sdk-bridge restart claude so the max "
                                f"inference and queue limits are {MAX_DEADLINE_S} s; see docs/operations.md.")
     return report
 

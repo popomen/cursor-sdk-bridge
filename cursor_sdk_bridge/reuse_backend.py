@@ -14,15 +14,15 @@ import json
 import time
 import uuid
 
-from cursor_bridge.failures import IsolationFailed, ModelMismatch, UpstreamIncomplete
-from cursor_bridge.request_log import REQUEST_STATS
-from cursor_bridge.responses_protocol import (
+from cursor_sdk_bridge.failures import IsolationFailed, ModelMismatch, UpstreamIncomplete
+from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.responses_protocol import (
     ATTACHED_IMAGE, FORMAT_REMINDER, IMAGE_NOTE, MAX_ATTACHED_IMAGES, MODELS,
     OMITTED_IMAGE, REQUEST_MARKER, decode_image, image_parts, normalize_choice,
     normalize_tools, qualified_name,
 )
-from cursor_bridge.sdk_backend import SDKBackend, USAGE_FIELDS
-from cursor_bridge.sdk_support import NATIVE_TOOL_EVENTS, model_identity, snapshot
+from cursor_sdk_bridge.sdk_backend import SDKBackend, USAGE_FIELDS
+from cursor_sdk_bridge.sdk_support import NATIVE_TOOL_EVENTS, model_identity, snapshot
 
 
 _REQUEST = contextvars.ContextVar("reuse_request", default=None)

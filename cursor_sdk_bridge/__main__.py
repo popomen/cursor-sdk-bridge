@@ -1,4 +1,4 @@
-from cursor_bridge.cli import main
+from cursor_sdk_bridge.cli import main
 
 if __name__ == '__main__':
     main()

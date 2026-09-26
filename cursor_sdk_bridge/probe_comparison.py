@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from cursor_bridge.responses_protocol import prepare_request
+from cursor_sdk_bridge.responses_protocol import prepare_request
 
 
 SEED = "cb26"

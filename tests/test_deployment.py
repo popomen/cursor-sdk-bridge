@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cursor_bridge import deployment, version
+from cursor_sdk_bridge import deployment, version
 
 SHA = 'a' * 40
 OLD = 'b' * 40
@@ -32,9 +32,9 @@ class FakeCommands:
 
 
 def extracted(repo, commit, release):
-    (release / 'cursor_bridge').mkdir()
-    (release / 'cursor_bridge/cli.py').touch()
-    (release / 'pyproject.toml').write_text('[project]\nname="cursor-bridge"\n')
+    (release / 'cursor_sdk_bridge').mkdir()
+    (release / 'cursor_sdk_bridge/cli.py').touch()
+    (release / 'pyproject.toml').write_text('[project]\nname="cursor-sdk-bridge"\n')
 
 
 class DeployTests(unittest.TestCase):
@@ -64,7 +64,7 @@ class DeployTests(unittest.TestCase):
         self.assertEqual((result['selected'], result['units_enabled'], result['services_restarted']), (True, True, False))
         self.assertEqual((self.root / 'current').resolve(), self.root / SHA)
         self.assertEqual(version.deployed_version(self.root), SHA)
-        self.assertTrue((self.bin / 'cursor-bridge').is_symlink())
+        self.assertTrue((self.bin / 'cursor-sdk-bridge').is_symlink())
         self.assertEqual(sorted(path.name for path in self.units.iterdir()),
                          sorted(deployment.unit_name(name) for name in deployment.INSTANCES))
         for path in self.units.iterdir():
@@ -114,7 +114,7 @@ class DeployTests(unittest.TestCase):
         self.assertEqual((self.root / 'current').resolve(), self.root / OLD)
         self.assertEqual(unit.read_text(), original)
         self.assertEqual(len(list(self.units.iterdir())), 1)
-        self.assertFalse((self.bin / 'cursor-bridge').is_symlink())
+        self.assertFalse((self.bin / 'cursor-sdk-bridge').is_symlink())
 
     def test_invalid_units_restore_previous_selection_before_enabling(self):
         self.root.mkdir()
@@ -129,7 +129,7 @@ class DeployTests(unittest.TestCase):
             self.deploy()
         self.assertEqual((self.root / 'current').resolve(), self.root / OLD)
         self.assertEqual(unit.read_text(), original)
-        self.assertFalse((self.bin / 'cursor-bridge').is_symlink())
+        self.assertFalse((self.bin / 'cursor-sdk-bridge').is_symlink())
         self.assertFalse(any('enable' in args for args in self.runner.calls))
 
     @unittest.skipUnless(shutil.which('systemd-analyze'), 'systemd-analyze is unavailable')
@@ -176,7 +176,7 @@ class DeployTests(unittest.TestCase):
         self.assertFalse((self.root / 'current').exists())
         target.unlink()
         self.bin.mkdir(exist_ok=True)
-        launcher = self.bin / 'cursor-bridge'
+        launcher = self.bin / 'cursor-sdk-bridge'
         launcher.write_text('user launcher')
         with self.assertRaises(deployment.DeploymentError):
             self.deploy()
@@ -195,7 +195,7 @@ class VersionTests(unittest.TestCase):
     def test_release_version_is_read_without_accessing_git_and_is_fixed(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            package = root / 'cursor_bridge'
+            package = root / 'cursor_sdk_bridge'
             package.mkdir()
             manifest = root / version.MANIFEST
             manifest.write_text(json.dumps({'commit': SHA}))

@@ -7,9 +7,9 @@ import time
 import uuid
 
 from jsonschema import Draft202012Validator
-from cursor_bridge.failures import InvalidRequest
-from cursor_bridge.request_log import REQUEST_STATS
-from cursor_bridge.tool_output import parse_output, strict_json
+from cursor_sdk_bridge.failures import InvalidRequest
+from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.tool_output import parse_output, strict_json
 
 MODELS = {f"claude-opus-5-5-{effort}": effort for effort in ("high", "xhigh", "max")}
 REQUEST_MARKER = "\nRequest:\n"
@@ -363,7 +363,7 @@ def completion_events(response, start_index=0):
     """Yield events after created/in_progress; deltas contain only validated output."""
     for index, item in enumerate(response["output"][start_index:], start_index):
         if item["type"] == "reasoning":
-            from cursor_bridge.live_output import ResponsesLive
+            from cursor_sdk_bridge.live_output import ResponsesLive
             buffered = []
             emitter = ResponsesLive(lambda kind, fields: buffered.append((kind, fields)))
             for part in item["summary"]:

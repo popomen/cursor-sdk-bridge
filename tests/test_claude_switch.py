@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cursor_bridge import claude_switch as switcher
-from cursor_bridge.probe_service import ProbeFailed
+from cursor_sdk_bridge import claude_switch as switcher
+from cursor_sdk_bridge.probe_service import ProbeFailed
 
 REAL_VERIFY = switcher.verify_service
 REAL_REPORT = switcher.service_report

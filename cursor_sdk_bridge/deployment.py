@@ -14,10 +14,10 @@ import time
 import urllib.error
 import urllib.request
 
-from cursor_bridge import version
+from cursor_sdk_bridge import version
 
 INSTANCES = ('codex', 'claude', 'dashboard')
-MANAGED = '# Managed by cursor-bridge.\n'
+MANAGED = '# Managed by cursor-sdk-bridge.\n'
 
 
 class DeploymentError(RuntimeError):
@@ -60,7 +60,7 @@ def atomic_link(path, target):
 def unit_name(instance):
     if instance not in INSTANCES:
         raise DeploymentError('Unknown instance')
-    return 'cursor-bridge-%s.service' % instance
+    return 'cursor-sdk-bridge-%s.service' % instance
 
 
 def quote_unit(value):
@@ -87,12 +87,12 @@ def unit_text(instance, root, release=None):
     # WorkingDirectory is a scalar path, unlike ExecStart's shell-like word list:
     # systemd treats surrounding quotes here as literal path characters.
     working_directory = str(current).replace('%', '%%')
-    return (MANAGED + '[Unit]\nDescription=Cursor Bridge ' + instance + '\nAfter=network-online.target\n'
+    return (MANAGED + '[Unit]\nDescription=Cursor SDK Bridge ' + instance + '\nAfter=network-online.target\n'
             '\n[Service]\nType=simple\nWorkingDirectory=' + working_directory + '\n'
-            'ExecStart=' + quote_unit(current / 'venv/bin/python') + ' -m cursor_bridge serve ' + instance + '\n'
+            'ExecStart=' + quote_unit(current / 'venv/bin/python') + ' -m cursor_sdk_bridge serve ' + instance + '\n'
             'Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1\n'
             'Environment=' + quote_unit('PATH=' + service_path()) + '\n'
-            'Environment=' + quote_unit('CURSOR_BRIDGE_DEPLOY_ROOT=' + str(root)) + '\n'
+            'Environment=' + quote_unit('CURSOR_SDK_BRIDGE_DEPLOY_ROOT=' + str(root)) + '\n'
             'UnsetEnvironment=PYTHONPATH PYTHONHOME\nUMask=0077\nRestart=on-failure\nRestartSec=3\n'
             'TimeoutStopSec=30\n\n[Install]\nWantedBy=default.target\n')
 
@@ -125,8 +125,8 @@ def install_release(repo, commit, root, runner=command, extractor=extract_commit
     release.mkdir(mode=0o755)
     try:
         extractor(repo, resolved, release)
-        if not (release / 'pyproject.toml').is_file() or not (release / 'cursor_bridge/cli.py').is_file():
-            raise DeploymentError('Commit is not a cursor-bridge release')
+        if not (release / 'pyproject.toml').is_file() or not (release / 'cursor_sdk_bridge/cli.py').is_file():
+            raise DeploymentError('Commit is not a cursor-sdk-bridge release')
         runner([sys.executable, '-m', 'venv', release / 'venv'], timeout=120)
         python = release / 'venv/bin/python'
         runner([python, '-m', 'pip', 'install', '--disable-pip-version-check', release], timeout=600)
@@ -159,11 +159,11 @@ def deploy(commit='HEAD', repo='.', root=None, unit_dir=None, bin_dir=None, inst
         if current.exists() and not current.is_symlink():
             raise DeploymentError('current exists and is not a managed symlink')
         previous = os.readlink(current) if current.is_symlink() else None
-        launcher = bin_dir / 'cursor-bridge'
-        launcher_target = root / 'current/venv/bin/cursor-bridge'
+        launcher = bin_dir / 'cursor-sdk-bridge'
+        launcher_target = root / 'current/venv/bin/cursor-sdk-bridge'
         if launcher.exists() or launcher.is_symlink():
             if not launcher.is_symlink() or os.readlink(launcher) != str(launcher_target):
-                raise DeploymentError('Existing cursor-bridge command belongs to another installation')
+                raise DeploymentError('Existing cursor-sdk-bridge command belongs to another installation')
         unit_dir.mkdir(parents=True, exist_ok=True)
         bin_dir.mkdir(parents=True, exist_ok=True)
         units = {unit_dir / unit_name(name): unit_text(name, root, release).encode() for name in INSTANCES}
@@ -173,7 +173,7 @@ def deploy(commit='HEAD', repo='.', root=None, unit_dir=None, bin_dir=None, inst
                 raise DeploymentError('Refusing to replace a unit symlink')
             data = path.read_bytes() if path.exists() else None
             if data is not None and not data.startswith(MANAGED.encode()):
-                raise DeploymentError('Existing user unit is not managed by cursor-bridge')
+                raise DeploymentError('Existing user unit is not managed by cursor-sdk-bridge')
             before[path] = data
         launcher_existed = launcher.is_symlink()
         wants = {unit_dir / 'default.target.wants' / path.name: path for path in units}

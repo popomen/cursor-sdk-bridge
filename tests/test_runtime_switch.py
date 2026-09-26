@@ -13,9 +13,9 @@ import tomllib
 import unittest
 from unittest.mock import Mock, patch
 
-from cursor_bridge import appserver_runtime as ar
-from cursor_bridge import runtime_switch as rs
-from cursor_bridge import switch_config as sc
+from cursor_sdk_bridge import appserver_runtime as ar
+from cursor_sdk_bridge import runtime_switch as rs
+from cursor_sdk_bridge import switch_config as sc
 
 
 class FakeRuntime:
@@ -93,7 +93,7 @@ class RuntimeSwitchIncidentTests(unittest.TestCase):
         self.auth = b'{"auth_mode":"fixture-only","fixture":"not-a-real-credential"}'
         (self.directory / 'auth.json').write_bytes(self.auth)
         self.runtime = FakeRuntime(self.directory)
-        for name in ('cursor_bridge.runtime_switch.verify_service', 'cursor_bridge.switch_config.verify_service', 'cursor_bridge.runtime_switch.probe'):
+        for name in ('cursor_sdk_bridge.runtime_switch.verify_service', 'cursor_sdk_bridge.switch_config.verify_service', 'cursor_sdk_bridge.runtime_switch.probe'):
             p = patch(name)
             p.start()
             self.addCleanup(p.stop)
@@ -253,7 +253,7 @@ class RuntimeSwitchIncidentTests(unittest.TestCase):
         self.assert_auth_preserved()
 
     def test_service_preflight_failure_does_not_stop_healthy_daemon(self):
-        with patch('cursor_bridge.runtime_switch.verify_service', side_effect=ValueError('fixture service down')):
+        with patch('cursor_sdk_bridge.runtime_switch.verify_service', side_effect=ValueError('fixture service down')):
             with self.assertRaises(ValueError):
                 self.apply('cursor')
         self.assertEqual(self.runtime.stopped, [])
@@ -262,7 +262,7 @@ class RuntimeSwitchIncidentTests(unittest.TestCase):
         self.assert_auth_preserved()
 
     def test_live_sdk_failure_leaves_openai_runtime_and_files_untouched(self):
-        with patch('cursor_bridge.runtime_switch.probe', side_effect=RuntimeError('fixture SDK failure')):
+        with patch('cursor_sdk_bridge.runtime_switch.probe', side_effect=RuntimeError('fixture SDK failure')):
             with self.assertRaises(RuntimeError):
                 self.apply('cursor')
         self.assertEqual(self.runtime.stopped, [])
@@ -291,7 +291,7 @@ class RuntimeSwitchIncidentTests(unittest.TestCase):
             real_switch(*args, **kwargs)
             target = self.directory / 'config.toml'
             target.write_bytes(b'# concurrent external editor\n' + target.read_bytes())
-        with patch('cursor_bridge.runtime_switch.switch', side_effect=switch_with_external_editor):
+        with patch('cursor_sdk_bridge.runtime_switch.switch', side_effect=switch_with_external_editor):
             with self.assertRaisesRegex(ar.RuntimeBlocked, 'recovery journal retained'):
                 self.apply('cursor')
         self.assertIn(b'# concurrent external editor\n', (self.directory / 'config.toml').read_bytes())
@@ -373,7 +373,7 @@ class RuntimeSwitchIncidentTests(unittest.TestCase):
     def test_same_mode_cursor_still_checks_adapter_health(self):
         self.apply('cursor')
         count = len(self.runtime.stopped)
-        with patch('cursor_bridge.runtime_switch.verify_service', side_effect=ValueError('fixture old adapter')):
+        with patch('cursor_sdk_bridge.runtime_switch.verify_service', side_effect=ValueError('fixture old adapter')):
             with self.assertRaises(ValueError):
                 self.apply('cursor', restart=False)
         self.assertEqual(len(self.runtime.stopped), count)
@@ -424,19 +424,19 @@ class DesktopRuntimeGuardTests(unittest.TestCase):
             self.runtime.mutation_guard()
 
     def test_proxy_presence_rejected_before_inspecting_tasks(self):
-        with patch.object(self.runtime, 'mutation_guard'), patch('cursor_bridge.appserver_runtime.proxy_pids', return_value=[42]), patch.object(self.runtime, 'inspect') as inspect:
+        with patch.object(self.runtime, 'mutation_guard'), patch('cursor_sdk_bridge.appserver_runtime.proxy_pids', return_value=[42]), patch.object(self.runtime, 'inspect') as inspect:
             with self.assertRaisesRegex(ar.RuntimeBlocked, 'Disconnect'):
                 self.runtime.idle()
             inspect.assert_not_called()
 
     def test_no_proxy_but_active_task_rejected(self):
         active = dict(self.snapshot, active_tasks=1)
-        with patch.object(self.runtime, 'mutation_guard'), patch('cursor_bridge.appserver_runtime.proxy_pids', return_value=[]), patch('cursor_bridge.appserver_runtime.verify_launch'), patch.object(self.runtime, 'inspect', return_value=active):
+        with patch.object(self.runtime, 'mutation_guard'), patch('cursor_sdk_bridge.appserver_runtime.proxy_pids', return_value=[]), patch('cursor_sdk_bridge.appserver_runtime.verify_launch'), patch.object(self.runtime, 'inspect', return_value=active):
             with self.assertRaisesRegex(ar.RuntimeBlocked, 'active tasks'):
                 self.runtime.idle()
 
     def test_start_never_adopts_existing_listener(self):
-        with patch.object(self.runtime, 'mutation_guard'), patch.object(self.runtime, 'idle', return_value=self.snapshot), patch('cursor_bridge.appserver_runtime.subprocess.Popen') as popen:
+        with patch.object(self.runtime, 'mutation_guard'), patch.object(self.runtime, 'idle', return_value=self.snapshot), patch('cursor_sdk_bridge.appserver_runtime.subprocess.Popen') as popen:
             with self.assertRaisesRegex(ar.RuntimeBlocked, 'not adopted or stopped'):
                 self.runtime.start('/fixture/codex')
             popen.assert_not_called()
@@ -448,7 +448,7 @@ class DesktopRuntimeGuardTests(unittest.TestCase):
         child.poll.return_value = None
         child.wait.return_value = -15
         foreign = dict(self.snapshot, pid=424299)
-        with patch.object(self.runtime, 'mutation_guard'), patch.object(self.runtime, 'idle', return_value={'state':'absent'}), patch.object(self.runtime, 'inspect', return_value=foreign), patch('cursor_bridge.appserver_runtime.subprocess.Popen', return_value=child) as popen:
+        with patch.object(self.runtime, 'mutation_guard'), patch.object(self.runtime, 'idle', return_value={'state':'absent'}), patch.object(self.runtime, 'inspect', return_value=foreign), patch('cursor_sdk_bridge.appserver_runtime.subprocess.Popen', return_value=child) as popen:
             with self.assertRaisesRegex(ar.RuntimeBlocked, 'different daemon won'):
                 self.runtime.start(str(executable))
         child.terminate.assert_called_once_with()
@@ -463,7 +463,7 @@ class DesktopRuntimeGuardTests(unittest.TestCase):
     def test_pidfd_identity_mismatch_never_signals(self):
         wrong = {k: self.snapshot[k] for k in ('pid','start_ticks','executable')}
         wrong['start_ticks'] += 1
-        with patch.object(self.runtime, 'idle', return_value=self.snapshot), patch('cursor_bridge.appserver_runtime.os.pidfd_open', return_value=91), patch('cursor_bridge.appserver_runtime.identity', return_value=wrong), patch('cursor_bridge.appserver_runtime.os.close') as close, patch('cursor_bridge.appserver_runtime.signal.pidfd_send_signal') as send:
+        with patch.object(self.runtime, 'idle', return_value=self.snapshot), patch('cursor_sdk_bridge.appserver_runtime.os.pidfd_open', return_value=91), patch('cursor_sdk_bridge.appserver_runtime.identity', return_value=wrong), patch('cursor_sdk_bridge.appserver_runtime.os.close') as close, patch('cursor_sdk_bridge.appserver_runtime.signal.pidfd_send_signal') as send:
             with self.assertRaisesRegex(ar.RuntimeBlocked, 'identity changed'):
                 self.runtime.stop(self.snapshot)
         send.assert_not_called()
@@ -471,7 +471,7 @@ class DesktopRuntimeGuardTests(unittest.TestCase):
 
     def test_stop_signals_the_same_pidfd_only(self):
         ident = {k: self.snapshot[k] for k in ('pid','start_ticks','executable')}
-        with patch.object(self.runtime, 'idle', return_value=self.snapshot), patch('cursor_bridge.appserver_runtime.os.pidfd_open', return_value=91) as open_pidfd, patch('cursor_bridge.appserver_runtime.identity', return_value=ident), patch('cursor_bridge.appserver_runtime.os.close') as close, patch('cursor_bridge.appserver_runtime.signal.pidfd_send_signal') as send, patch('cursor_bridge.appserver_runtime.select.select', side_effect=[([],[],[]),([91],[],[])]):
+        with patch.object(self.runtime, 'idle', return_value=self.snapshot), patch('cursor_sdk_bridge.appserver_runtime.os.pidfd_open', return_value=91) as open_pidfd, patch('cursor_sdk_bridge.appserver_runtime.identity', return_value=ident), patch('cursor_sdk_bridge.appserver_runtime.os.close') as close, patch('cursor_sdk_bridge.appserver_runtime.signal.pidfd_send_signal') as send, patch('cursor_sdk_bridge.appserver_runtime.select.select', side_effect=[([],[],[]),([91],[],[])]):
             self.runtime.stop(self.snapshot)
         open_pidfd.assert_called_once_with(self.snapshot['pid'])
         self.assertEqual([call.args for call in send.call_args_list], [(91,signal.SIGTERM),(91,signal.SIGKILL)])

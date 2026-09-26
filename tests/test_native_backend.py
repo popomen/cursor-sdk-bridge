@@ -6,10 +6,10 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
-from cursor_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, UpstreamIncomplete
-from cursor_bridge.native_backend import NativeSDKBackend, completed_results, native_prompt
-from cursor_bridge.request_log import REQUEST_STATS
-from cursor_bridge.responses_protocol import InvalidRequest, complete_response, prepare_request, response_shell
+from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, UpstreamIncomplete
+from cursor_sdk_bridge.native_backend import NativeSDKBackend, completed_results, native_prompt
+from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.responses_protocol import InvalidRequest, complete_response, prepare_request, response_shell
 
 
 MODEL = "claude-opus-5-5-high"
@@ -427,7 +427,7 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.sdk.created), 2)
 
     async def test_namespace_and_images_use_native_sdk_shapes(self):
-        from cursor_bridge.reuse_backend import _digest
+        from cursor_sdk_bridge.reuse_backend import _digest
         tool = {"type": "namespace", "name": "functions", "tools": [TOOL]}
         sdk_name = "bridge_" + _digest("functions.lookup")[:32]
         self.sdk.scripts = [[("tools", [(sdk_name, {"key": "a"})]), ("text", "done")]]

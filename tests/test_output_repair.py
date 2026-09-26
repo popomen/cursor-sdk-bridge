@@ -1,9 +1,9 @@
 import json
 import unittest
 
-from cursor_bridge.request_log import REQUEST_STATS
-from cursor_bridge.responses_protocol import complete_response, recover_output, response_shell
-from cursor_bridge.tool_output import strict_json
+from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.responses_protocol import complete_response, recover_output, response_shell
+from cursor_sdk_bridge.tool_output import strict_json
 
 MODEL = "claude-opus-5-5-xhigh"
 NL, FENCE = chr(10), "`" * 3

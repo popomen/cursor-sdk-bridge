@@ -1,12 +1,12 @@
 # Operating Cursor SDK Bridge
 
-`cursor-bridge status` reads client configuration, daemon identity, service progress, request metadata and release versions. It does not make an inference request. The three instances are:
+`cursor-sdk-bridge status` reads client configuration, daemon identity, service progress, request metadata and release versions. It does not make an inference request. The three instances are:
 
 | Instance | Port | User unit | Existing state |
 | --- | --- | --- | --- |
-| Codex | 8789 | `cursor-bridge-codex.service` | `~/.codex/cursor-sdk2api` |
-| Claude Code | 8790 | `cursor-bridge-claude.service` | `~/.codex/cursor-sdk2api-claude` |
-| Dashboard | 8791 | `cursor-bridge-dashboard.service` | reads both instances |
+| Codex | 8789 | `cursor-sdk-bridge-codex.service` | `~/.codex/cursor-sdk2api` |
+| Claude Code | 8790 | `cursor-sdk-bridge-claude.service` | `~/.codex/cursor-sdk2api-claude` |
+| Dashboard | 8791 | `cursor-sdk-bridge-dashboard.service` | reads both instances |
 
 The SDK key stays at `~/.codex/cursor-sdk-api-key`. Client backups and transaction journals stay at `~/.codex/cursor-fallback-state`. Deployment never moves these paths or changes their permissions. Logs contain request metadata, never prompt text, tool results, model output or credentials.
 
@@ -17,7 +17,7 @@ The SDK requires a Cursor User API key, not the CLI OAuth token. Its native brid
 Commit and test the source before deployment. From the project checkout:
 
 ```sh
-python -m cursor_bridge deploy HEAD --install-only
+python -m cursor_sdk_bridge deploy HEAD --install-only
 ```
 
 The command resolves a Git commit, archives its tracked files, creates a separate virtual environment, installs the pinned requirements and package, checks dependencies, and writes a release manifest. The installed dependency inventory is private to that release. Installation failures remove only the new incomplete release. Existing complete releases are reused.
@@ -25,10 +25,10 @@ The command resolves a Git commit, archives its tracked files, creates a separat
 Validate an installed release on temporary ports with separate experiment state; do not share a workspace with a running production instance:
 
 ```sh
-~/.local/share/cursor-bridge/<commit>/venv/bin/cursor-bridge serve codex \
-  --port 9889 --state-dir /tmp/cursor-bridge-validation-codex --mode legacy
-~/.local/share/cursor-bridge/<commit>/venv/bin/cursor-bridge serve claude \
-  --port 9890 --state-dir /tmp/cursor-bridge-validation-claude --mode reuse
+~/.local/share/cursor-sdk-bridge/<commit>/venv/bin/cursor-sdk-bridge serve codex \
+  --port 9889 --state-dir /tmp/cursor-sdk-bridge-validation-codex --mode legacy
+~/.local/share/cursor-sdk-bridge/<commit>/venv/bin/cursor-sdk-bridge serve claude \
+  --port 9890 --state-dir /tmp/cursor-sdk-bridge-validation-claude --mode reuse
 ```
 
 Modes are explicit rollback choices: `legacy` preserves full-history JSON output; `reuse` and `native` select the newer paths when supported by that release. Use the adapter's `serve --help` for its current default and limits.
@@ -36,7 +36,7 @@ Modes are explicit rollback choices: `legacy` preserves full-history JSON output
 After validation, select the same commit:
 
 ```sh
-python -m cursor_bridge deploy <commit>
+python -m cursor_sdk_bridge deploy <commit>
 ```
 
 This atomically selects `current`, registers three ordinary user unit files under `~/.config/systemd/user`, and enables them for `default.target`. It never starts, stops or restarts a service. Units refer directly to the immutable commit path, including the virtual environment, so selecting another release cannot change imports in existing processes. The dashboard indicates that a restart is needed when `/health.running_version` differs from the selected manifest. Checkout mtimes have no effect.
@@ -46,9 +46,9 @@ The command preserves unrelated command links and unit files by refusing to repl
 ## Restart without interrupting work
 
 ```sh
-cursor-bridge restart claude
-cursor-bridge restart codex
-cursor-bridge restart dashboard
+cursor-sdk-bridge restart claude
+cursor-sdk-bridge restart codex
+cursor-sdk-bridge restart dashboard
 ```
 
 For an adapter, the command first reads current progress and sockets. It then sends loopback-only `POST /admin/drain` with `{}`. Draining closes request admission and atomically reports `{"draining":true,"unfinished":0}` only when no request remains. Pending tools and detached runs count as unfinished. A busy response uses HTTP 409 and leaves admission open, so an existing run can still receive its tool results.
@@ -60,8 +60,8 @@ Only a confirmed zero unfinished count and zero established connections after th
 Claude Code keeps its existing settings backup and user-selected Cursor model tier:
 
 ```sh
-cursor-bridge switch claude cursor
-cursor-bridge switch claude restore
+cursor-sdk-bridge switch claude cursor
+cursor-sdk-bridge switch claude restore
 ```
 
 The first Cursor switch performs two real synthetic tool outputs at high effort, usually around one to two minutes. Repeating an already valid switch checks compatibility and updates managed settings without repeating inference. New sessions use the selected provider; existing sessions and Mew settings are untouched. Cursor model aliases keep `[1m]`; stream idle timeout, nonstreaming fallback, retry limits and `x-should-retry` handling remain part of the adapter compatibility contract.
@@ -71,8 +71,8 @@ The first Cursor switch performs two real synthetic tool outputs at high effort,
 Codex switching must run from an independent SSH terminal, after disconnecting Desktop and waiting for all daemon tasks to finish:
 
 ```sh
-cursor-bridge switch codex cursor --restart-daemon
-cursor-bridge switch codex restore --restart-daemon
+cursor-sdk-bridge switch codex cursor --restart-daemon
+cursor-sdk-bridge switch codex restore --restart-daemon
 ```
 
 The command preserves OpenAI credentials, uses the existing transaction journal, validates synthetic namespace calls, and restarts only the verified idle daemon. A switch is successful only when `runtime_matches_config: true` and no transaction remains. The catalog must point into a deployed release. Never execute the daemon restart from its own active Codex task. Existing conversations retain their original provider.
@@ -88,9 +88,9 @@ If a pre-existing `cursor` definition points to another backend, restoring it al
 ## Probes and rollback
 
 ```sh
-cursor-bridge probe --port 9889
-cursor-bridge probe --messages --port 9890
-cursor-bridge probe --image --port 9889
+cursor-sdk-bridge probe --port 9889
+cursor-sdk-bridge probe --messages --port 9890
+cursor-sdk-bridge probe --image --port 9889
 ```
 
 A probe consumes one or two real SDK outputs; high effort typically takes one to two minutes. Announce expected quota use before running it. Probe metadata and sanitized receipts belong in `docs/evidence`; never store request content or credentials there. Authentication failures require a credential-validity check before more paid inference.

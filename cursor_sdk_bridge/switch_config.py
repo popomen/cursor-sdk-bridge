@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent
 MIN_ADAPTER_VERSION = 3
 CATALOG_PATH_UPGRADE = (
     "The Cursor model catalog points at an older installation. Disconnect the Desktop SSH remote, "
-    "then run cursor-bridge switch codex cursor --restart-daemon from a separate SSH terminal "
+    "then run cursor-sdk-bridge switch codex cursor --restart-daemon from a separate SSH terminal "
     "to update the managed catalog path and verify the restarted daemon."
 )
 MANAGED = [(key,) for key in ("model", "model_provider", "model_catalog_json", "model_reasoning_effort",
@@ -173,10 +173,10 @@ def verify_service(port):
         if health.get("service") != "cursor-sdk2api":
             raise ServiceNotReady("Unexpected local service; configuration was not switched.")
         if "namespace_functions" not in health.get("capabilities", []):
-            raise ServiceNotReady("Run cursor-bridge restart codex with the repaired adapter before switching.")
+            raise ServiceNotReady("Run cursor-sdk-bridge restart codex with the repaired adapter before switching.")
         version = health.get("adapter_version")
         if not isinstance(version, int) or version < MIN_ADAPTER_VERSION or "image_inputs" not in health["capabilities"]:
-            raise ServiceNotReady("Run cursor-bridge restart codex so it serves the image-capable adapter "
+            raise ServiceNotReady("Run cursor-sdk-bridge restart codex so it serves the image-capable adapter "
                                   f"(adapter_version {MIN_ADAPTER_VERSION}) before switching.")
     with opener.open(f"http://127.0.0.1:{port}/v1/models", timeout=3) as response:
         actual = {item["id"] for item in json.load(response)["data"]}
@@ -388,10 +388,10 @@ def main():
     args = parser.parse_args()
     try:
         if args.command != "status":
-            from cursor_bridge.runtime_switch import apply_mode
+            from cursor_sdk_bridge.runtime_switch import apply_mode
             apply_mode(args.codex_dir, args.command, args.port, args.restart_daemon)
         result = status(args.codex_dir)
-        from cursor_bridge.appserver_runtime import STALE_CATALOG, DesktopRuntime, catalog_reload_required
+        from cursor_sdk_bridge.appserver_runtime import STALE_CATALOG, DesktopRuntime, catalog_reload_required
         runtime = DesktopRuntime(args.codex_dir)
         try:
             observed = runtime.inspect()
@@ -406,20 +406,20 @@ def main():
             result["runtime_matches_config"] = False
         result["service"] = service_report(args.port)
         if result["provider"] == "cursor" and not result["service"].get("image_inputs"):
-            result["service"]["next_step"] = ("Run cursor-bridge restart codex when idle so the service "
+            result["service"]["next_step"] = ("Run cursor-sdk-bridge restart codex when idle so the service "
                                               "uses the image-capable adapter.")
         print(json.dumps(result, ensure_ascii=False))
         if args.command != "status":
             if (not result['runtime_matches_config'] or result['transaction_pending']
                     or (args.command == 'cursor' and result['catalog_path_upgrade_required'])):
-                from cursor_bridge.appserver_runtime import RuntimeBlocked
+                from cursor_sdk_bridge.appserver_runtime import RuntimeBlocked
                 raise RuntimeBlocked('Final runtime verification changed, catalog upgrade is pending, or a transaction remains; inspect status before reconnecting.')
             print("Remote daemon provider and model list verified. Reconnect Desktop; create a NEW task for the new provider.")
     except Exception as exc:
-        from cursor_bridge.appserver_runtime import RuntimeBlocked
-        from cursor_bridge.probe_service import ProbeFailed
+        from cursor_sdk_bridge.appserver_runtime import RuntimeBlocked
+        from cursor_sdk_bridge.probe_service import ProbeFailed
         # runtime_switch imports this module by name when this file is __main__.
-        from cursor_bridge.switch_config import ServiceNotReady as ImportedServiceNotReady
+        from cursor_sdk_bridge.switch_config import ServiceNotReady as ImportedServiceNotReady
         if isinstance(exc, (RuntimeBlocked, ProbeFailed, ServiceNotReady, ImportedServiceNotReady)):
             print(str(exc))
             raise SystemExit(1)

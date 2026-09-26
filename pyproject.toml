@@ -3,17 +3,17 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cursor-bridge"
+name = "cursor-sdk-bridge"
 version = "0.1.0"
 description = "Local Responses and Messages bridge to Cursor SDK"
 requires-python = ">=3.11"
 dependencies = ["cursor-sdk==1.0.32", "jsonschema==4.26.0", "tomlkit==0.13.3", "websockets==15.0.1"]
 
 [project.scripts]
-cursor-bridge = "cursor_bridge.cli:main"
+cursor-sdk-bridge = "cursor_sdk_bridge.cli:main"
 
 [tool.setuptools]
-packages = ["cursor_bridge"]
+packages = ["cursor_sdk_bridge"]
 
 [tool.setuptools.package-data]
-cursor_bridge = ["assets/*.json", "*.mjs"]
+cursor_sdk_bridge = ["assets/*.json", "*.mjs"]

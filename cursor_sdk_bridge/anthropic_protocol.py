@@ -3,8 +3,8 @@ import hashlib
 import json
 import uuid
 
-from cursor_bridge.failures import PromptTooLarge
-from cursor_bridge.responses_protocol import InvalidRequest, MODELS, prepare_request
+from cursor_sdk_bridge.failures import PromptTooLarge
+from cursor_sdk_bridge.responses_protocol import InvalidRequest, MODELS, prepare_request
 
 HOST = "Claude Code Messages"
 # Adapter prompts average about 2.3 bytes per SDK token, plus a ~3k-token SDK preamble.

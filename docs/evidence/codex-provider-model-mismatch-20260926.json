@@ -20,8 +20,11 @@
     "ui_action_source_known": false
   },
   "isolated_probe": {
-    "module": "cursor_bridge.probe_desktop",
-    "arguments": ["--stub", "--effort", "xhigh"],
+    "arguments": [
+      "--stub",
+      "--effort",
+      "xhigh"
+    ],
     "native_codex_executable": true,
     "private_sqlite_and_log_directories": true,
     "ephemeral_new_thread": true,

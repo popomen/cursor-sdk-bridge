@@ -23,7 +23,7 @@ import tomllib
 import urllib.parse
 import urllib.request
 
-from cursor_bridge import claude_switch, deployment, version
+from cursor_sdk_bridge import claude_switch, deployment, version
 
 HOME = Path.home()
 DEFAULT_PORT = 8791
@@ -31,9 +31,9 @@ DEFAULT_PORT = 8791
 REQUIRED_CAPABILITIES = ('sdk_progress', 'anthropic_messages')
 INSTANCES = (
     {'name': 'codex', 'client': 'Codex', 'port': 8789, 'state_dir': HOME / '.codex/cursor-sdk2api',
-     'unit': 'cursor-bridge-codex.service', 'limits': {'max': 1200, 'queue_timeout': 1200}},
+     'unit': 'cursor-sdk-bridge-codex.service', 'limits': {'max': 1200, 'queue_timeout': 1200}},
     {'name': 'claude', 'client': 'Claude Code', 'port': claude_switch.DEFAULT_PORT,
-     'state_dir': HOME / '.codex/cursor-sdk2api-claude', 'unit': 'cursor-bridge-claude.service',
+     'state_dir': HOME / '.codex/cursor-sdk2api-claude', 'unit': 'cursor-sdk-bridge-claude.service',
      'limits': {'max': claude_switch.MAX_DEADLINE_S, 'queue_timeout': claude_switch.QUEUE_TIMEOUT_S}},
 )
 LOG_FILES = ('requests.jsonl.3', 'requests.jsonl.2', 'requests.jsonl.1', 'requests.jsonl')
@@ -307,7 +307,7 @@ def describe(spec, health, error):
         deadlines = limits.get('deadlines') if isinstance(limits.get('deadlines'), dict) else {}
         expected = spec['limits']
         if deadlines.get('max') != expected['max'] or limits.get('queue_timeout') != expected['queue_timeout']:
-            notes.append('max 推理时限 %s、排队上限 %s，预期分别为 %s、%s；实例空闲后用 cursor-bridge restart %s 重启。' % (
+            notes.append('max 推理时限 %s、排队上限 %s，预期分别为 %s、%s；实例空闲后用 cursor-sdk-bridge restart %s 重启。' % (
                 seconds(deadlines.get('max')), seconds(limits.get('queue_timeout')), seconds(expected['max']),
                 seconds(expected['queue_timeout']), spec['name']))
     if progress is None:
@@ -621,7 +621,7 @@ class Handler(BaseHTTPRequestHandler):
                 return 404, 'unknown instance', TEXT
             return 200, render_confirm(board.inspect(spec), board.token), HTML
         if parts.path == '/health':
-            return 200, json.dumps({'service': 'cursor-bridge-dashboard', 'status': 'ready',
+            return 200, json.dumps({'service': 'cursor-sdk-bridge-dashboard', 'status': 'ready',
                                     'running_version': version.running_version(),
                                     'deployed_version': board.version_reader()}), 'application/json'
         if parts.path == '/api/status':

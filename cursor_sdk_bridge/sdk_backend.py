@@ -4,10 +4,10 @@ import contextlib
 from pathlib import Path
 import time
 
-from cursor_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete
-from cursor_bridge.request_log import REQUEST_STATS
-from cursor_bridge.responses_protocol import MODELS
-from cursor_bridge.sdk_support import NATIVE_TOOL_EVENTS, bridge_command, model_identity, snapshot
+from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete
+from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.responses_protocol import MODELS
+from cursor_sdk_bridge.sdk_support import NATIVE_TOOL_EVENTS, bridge_command, model_identity, snapshot
 
 DEFAULT_TIMEOUTS = {"high": 1200, "xhigh": 1200, "max": 1200}
 DEFAULT_QUEUE_TIMEOUT = 1200

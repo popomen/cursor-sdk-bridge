@@ -168,7 +168,7 @@ async def fake_driver(probe):
 
 async def live_driver(probe, key_file, workspace, route, effort):
     from cursor_sdk import AgentOptions, CustomTool, LocalAgentOptions, SendOptions
-    from cursor_bridge.sdk_backend import SDKBackend, USAGE_FIELDS
+    from cursor_sdk_bridge.sdk_backend import SDKBackend, USAGE_FIELDS
 
     backend = SDKBackend(key_file, workspace, timeout=probe.timeout, route=route)
     agent = run = None
@@ -223,7 +223,7 @@ async def run_probe(*, live=False, key_file=None, route="proxychains", effort="h
                "sdk_version": importlib.metadata.version("cursor-sdk"), "live": live,
                "scope": "upstream SDK run" if live else "real SDK callback server with FakeSdk run",
                "upstream_inference_calls": 0}
-    with tempfile.TemporaryDirectory(prefix="cursor-bridge-native-probe-") as directory:
+    with tempfile.TemporaryDirectory(prefix="cursor-sdk-bridge-native-probe-") as directory:
         workspace = Path(directory) / "workspace"
         async def driver(probe):
             if live:

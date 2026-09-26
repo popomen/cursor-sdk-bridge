@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from cursor_bridge.sdk_backend import SDKBackend
+from cursor_sdk_bridge.sdk_backend import SDKBackend
 
 
 class StubClient:

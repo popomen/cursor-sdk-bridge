@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 import unittest
 
-from cursor_bridge.probe_native import PendingProbe, run_probe
+from cursor_sdk_bridge.probe_native import PendingProbe, run_probe
 
 
 class CallbackContractTests(unittest.IsolatedAsyncioTestCase):

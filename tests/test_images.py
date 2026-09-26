@@ -12,20 +12,20 @@ import time
 import unittest
 import zlib
 
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.probe_service import PALETTE, ProbeFailed, probe_image
-from cursor_bridge.request_log import RequestLog
-from cursor_bridge.responses_protocol import (ATTACHED_IMAGE, IMAGE_NOTE, MAX_IMAGE_BYTES, OMITTED_IMAGE, image_dimension,
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.probe_service import PALETTE, ProbeFailed, probe_image
+from cursor_sdk_bridge.request_log import RequestLog
+from cursor_sdk_bridge.responses_protocol import (ATTACHED_IMAGE, IMAGE_NOTE, MAX_IMAGE_BYTES, OMITTED_IMAGE, image_dimension,
                                 image_format, request_payload)
-from cursor_bridge.sdk_backend import SDKBackend
-from cursor_bridge.switch_config import ServiceNotReady, service_report, verify_service
+from cursor_sdk_bridge.sdk_backend import SDKBackend
+from cursor_sdk_bridge.switch_config import ServiceNotReady, service_report, verify_service
 from test_cursor_sdk2api import MODEL, StubSDK
 from test_sdk_backend import StubClient
 
 OK = '{"output":[{"type":"message","text":"ok"}]}'
 VIEW_IMAGE = {"type": "function", "name": "view_image", "parameters": {"type": "object", "properties": {
     "path": {"type": "string"}}, "required": ["path"], "additionalProperties": False}}
-CATALOG = Path(__file__).resolve().parent.parent / "cursor_bridge/assets/models.json"
+CATALOG = Path(__file__).resolve().parent.parent / "cursor_sdk_bridge/assets/models.json"
 
 
 def png(width=2, height=1, rgb=(255, 0, 0)):

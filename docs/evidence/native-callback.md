@@ -1,6 +1,6 @@
 # Native callback feasibility
 
-`python -m cursor_bridge.probe_native` is a deterministic FakeSdk experiment.
+`python -m cursor_sdk_bridge.probe_native` is a deterministic FakeSdk experiment.
 It uses the installed `cursor_sdk==1.0.32` `ToolCallbackServer`, two parallel
 `CustomTool.execute` callbacks, and two separate public HTTP requests. The
 first public response closes while both callback futures remain pending. The
@@ -13,7 +13,7 @@ separate upstream experiment is required to verify the SDK runtime. After
 announcing its approximate consumption, run it with:
 
 ```sh
-python -m cursor_bridge.probe_native --live --effort high --timeout 180 \
+python -m cursor_sdk_bridge.probe_native --live --effort high --timeout 180 \
   --output docs/evidence/native-callback-live.json
 ```
 

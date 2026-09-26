@@ -11,15 +11,15 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from cursor_bridge import cursor_sdk2api
-from cursor_bridge.anthropic_protocol import (OMITTED, complete_message, estimate_tokens, message_shell, prepare_messages,
+from cursor_sdk_bridge import cursor_sdk2api
+from cursor_sdk_bridge.anthropic_protocol import (OMITTED, complete_message, estimate_tokens, message_shell, prepare_messages,
                                 prompt_too_long, stream_events, usage_block)
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.failures import DeadlineExpired, UpstreamIncomplete
-from cursor_bridge.probe_service import ProbeFailed, probe_messages, quadrant_png
-from cursor_bridge.request_log import REQUEST_STATS, RequestLog
-from cursor_bridge.responses_protocol import MODELS, InvalidRequest, complete_response, request_payload
-from cursor_bridge.sdk_backend import SDKBackend
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.failures import DeadlineExpired, UpstreamIncomplete
+from cursor_sdk_bridge.probe_service import ProbeFailed, probe_messages, quadrant_png
+from cursor_sdk_bridge.request_log import REQUEST_STATS, RequestLog
+from cursor_sdk_bridge.responses_protocol import MODELS, InvalidRequest, complete_response, request_payload
+from cursor_sdk_bridge.sdk_backend import SDKBackend
 from test_cursor_sdk2api import StubSDK
 from test_sdk_backend import StubClient
 

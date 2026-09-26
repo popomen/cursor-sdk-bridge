@@ -11,13 +11,13 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from cursor_bridge import cursor_sdk2api
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.failures import (DeadlineExpired, InvalidRequest, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete,
+from cursor_sdk_bridge import cursor_sdk2api
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.failures import (DeadlineExpired, InvalidRequest, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete,
                       error_code, failure_label)
-from cursor_bridge.request_log import REQUEST_STATS, RequestLog
-from cursor_bridge.responses_protocol import FORMAT_REMINDER, prepare_request, request_payload
-from cursor_bridge.sdk_backend import SDKBackend
+from cursor_sdk_bridge.request_log import REQUEST_STATS, RequestLog
+from cursor_sdk_bridge.responses_protocol import FORMAT_REMINDER, prepare_request, request_payload
+from cursor_sdk_bridge.sdk_backend import SDKBackend
 from test_cursor_sdk2api import MODEL, StubSDK
 from test_sdk_backend import StubClient
 

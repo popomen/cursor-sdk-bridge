@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import tomlkit
-from cursor_bridge import switch_config as switcher
+from cursor_sdk_bridge import switch_config as switcher
 
 ORIGINAL = '''# user comment
 model = "gpt-6-astra"
@@ -294,7 +294,7 @@ X-Test = "original-header-value"
         self.assertFalse(status['managed_config_conflict'])
         self.assertEqual(status['model_catalog_json'], str(old))
         self.assertEqual(status['expected_model_catalog_json'], str(switcher.ROOT / 'assets/models.json'))
-        self.assertIn('cursor-bridge switch codex cursor --restart-daemon', status['next_step'])
+        self.assertIn('cursor-sdk-bridge switch codex cursor --restart-daemon', status['next_step'])
         self.assertIn('separate SSH terminal', status['next_step'])
         self.assertEqual((self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()), before)
 

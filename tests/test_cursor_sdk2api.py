@@ -4,8 +4,8 @@ import json
 import threading
 import unittest
 
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.responses_protocol import request_payload
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.responses_protocol import request_payload
 
 MODEL = "claude-opus-5-5-high"
 TOOL = {"type": "function", "name": "lookup", "parameters": {"type": "object", "properties": {

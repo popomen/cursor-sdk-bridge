@@ -6,10 +6,10 @@ import tempfile
 import threading
 import unittest
 
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.failures import UpstreamIncomplete
-from cursor_bridge.live_output import LiveOutput
-from cursor_bridge.responses_protocol import complete_response, response_shell
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.failures import UpstreamIncomplete
+from cursor_sdk_bridge.live_output import LiveOutput
+from cursor_sdk_bridge.responses_protocol import complete_response, response_shell
 
 MODEL = "claude-opus-5-5-high"
 

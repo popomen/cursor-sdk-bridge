@@ -5,10 +5,10 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
-from cursor_bridge.failures import DeadlineExpired, IsolationFailed, QueueTimeout, UpstreamIncomplete
-from cursor_bridge.request_log import REQUEST_STATS
-from cursor_bridge.responses_protocol import complete_response, prepare_request, request_payload, response_shell
-from cursor_bridge.reuse_backend import ReuseSDKBackend, canonical_history, policy_digest
+from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, QueueTimeout, UpstreamIncomplete
+from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.responses_protocol import complete_response, prepare_request, request_payload, response_shell
+from cursor_sdk_bridge.reuse_backend import ReuseSDKBackend, canonical_history, policy_digest
 
 
 MODEL = "claude-opus-5-5-high"

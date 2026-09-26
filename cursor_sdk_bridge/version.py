@@ -5,11 +5,11 @@ import os
 from pathlib import Path
 import subprocess
 
-MANIFEST = '.cursor-bridge-release.json'
+MANIFEST = '.cursor-sdk-bridge-release.json'
 
 
 def deploy_root():
-    return Path(os.environ.get('CURSOR_BRIDGE_DEPLOY_ROOT', Path.home() / '.local/share/cursor-bridge')).expanduser()
+    return Path(os.environ.get('CURSOR_SDK_BRIDGE_DEPLOY_ROOT', Path.home() / '.local/share/cursor-sdk-bridge')).expanduser()
 
 
 def manifest_version(path):

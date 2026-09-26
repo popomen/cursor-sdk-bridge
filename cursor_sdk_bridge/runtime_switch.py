@@ -7,9 +7,9 @@ from pathlib import Path
 import time
 import tomllib
 
-from cursor_bridge.appserver_runtime import STALE_CATALOG, DesktopRuntime, RuntimeBlocked, catalog_reload_required
-from cursor_bridge.probe_service import probe
-from cursor_bridge.switch_config import (CATALOG_PATH_UPGRADE, atomic, bundled_catalog, decode, encode, read,
+from cursor_sdk_bridge.appserver_runtime import STALE_CATALOG, DesktopRuntime, RuntimeBlocked, catalog_reload_required
+from cursor_sdk_bridge.probe_service import probe
+from cursor_sdk_bridge.switch_config import (CATALOG_PATH_UPGRADE, atomic, bundled_catalog, decode, encode, read,
                                         status, switch, verify_service, write_state)
 
 
@@ -84,7 +84,7 @@ def apply_mode(directory, mode, port=8789, restart=False, runtime=None):
             raise RuntimeBlocked(CATALOG_PATH_UPGRADE)
         if clean and mode == "cursor" and catalog_reload_required(current, current_config):
             raise RuntimeBlocked(STALE_CATALOG)
-        raise RuntimeBlocked("Runtime switch not applied. Disconnect the Desktop SSH remote and run cursor-bridge switch codex cursor|restore --restart-daemon from a separate SSH terminal.")
+        raise RuntimeBlocked("Runtime switch not applied. Disconnect the Desktop SSH remote and run cursor-sdk-bridge switch codex cursor|restore --restart-daemon from a separate SSH terminal.")
     preliminary = runtime.idle()
     if not pending and preliminary['state'] != 'running':
         raise RuntimeBlocked('No running daemon to identify. Connect Desktop once, then disconnect and retry; configuration was not changed.')
@@ -169,6 +169,6 @@ def apply_mode(directory, mode, port=8789, restart=False, runtime=None):
             except Exception:
                 journal["phase"] = "recovery_required"
                 write_state(journal_path, journal)
-                raise RuntimeBlocked("Switch failed; recovery journal retained. OpenAI credentials were preserved. Disconnect Desktop and rerun cursor-bridge switch codex restore --restart-daemon to recover, or inspect status if external changes exist.") from None
+                raise RuntimeBlocked("Switch failed; recovery journal retained. OpenAI credentials were preserved. Disconnect Desktop and rerun cursor-sdk-bridge switch codex restore --restart-daemon to recover, or inspect status if external changes exist.") from None
             message = str(exc) if isinstance(exc, RuntimeBlocked) else "Switch failed (" + type(exc).__name__ + ")."
             raise RuntimeBlocked(message + " Previous mode was restored and runtime verified.") from None

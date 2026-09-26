@@ -3,7 +3,7 @@ import json
 import unittest
 
 from jsonschema import ValidationError
-from cursor_bridge.tool_output import parse_output, strict_json
+from cursor_sdk_bridge.tool_output import parse_output, strict_json
 
 
 TOOL = {'name': 'lookup', 'parameters': {'type': 'object', 'properties': {'query': {'type': 'string'}},

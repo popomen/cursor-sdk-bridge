@@ -17,7 +17,7 @@ import time
 ALIASES = {f"claude-opus-5-5-{effort}" for effort in ("high", "xhigh", "max")}
 CONFIG_KEYS = ("model_provider", "model", "model_reasoning_effort", "model_catalog_json")
 STALE_CATALOG = ("The running app-server still uses the model catalog it loaded at startup. Disconnect the "
-                 "Desktop SSH remote, then run cursor-bridge switch codex cursor --restart-daemon from a separate SSH terminal.")
+                 "Desktop SSH remote, then run cursor-sdk-bridge switch codex cursor --restart-daemon from a separate SSH terminal.")
 
 
 def catalog_modalities(path):

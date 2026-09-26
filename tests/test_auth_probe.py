@@ -3,9 +3,9 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
-from cursor_bridge.failures import KeyInvalid
-from cursor_bridge.request_log import REQUEST_STATS
-from cursor_bridge.sdk_backend import SDKBackend
+from cursor_sdk_bridge.failures import KeyInvalid
+from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.sdk_backend import SDKBackend
 
 
 class Denied(Exception):

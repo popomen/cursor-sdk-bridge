@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cursor_bridge.sdk_support import PROXY_VARS, bridge_command, model_identity, snapshot
+from cursor_sdk_bridge.sdk_support import PROXY_VARS, bridge_command, model_identity, snapshot
 
 
 class SDKSupportTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class SDKSupportTests(unittest.TestCase):
 
     def test_bridge_command_owns_node_and_clears_proxy_variables(self):
         with patch('cursor_sdk._vendor.resolve_bridge_path', return_value='/bundle/bin/bridge'), \
-                patch('cursor_bridge.sdk_support.proxychains_binary', return_value='/private/proxychains4'):
+                patch('cursor_sdk_bridge.sdk_support.proxychains_binary', return_value='/private/proxychains4'):
             command = bridge_command('proxychains', 'http1')
             prefix = ['env'] + [part for name in PROXY_VARS for part in ('-u', name)]
             self.assertEqual(command[:len(prefix)], prefix)

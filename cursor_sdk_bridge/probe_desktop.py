@@ -22,9 +22,9 @@ import threading
 import time
 import uuid
 
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.responses_protocol import request_payload, unwrap_fence
-from cursor_bridge.tool_output import parse_output, strict_json
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.responses_protocol import request_payload, unwrap_fence
+from cursor_sdk_bridge.tool_output import parse_output, strict_json
 
 ROOT = Path(__file__).resolve().parent
 FINAL_TEXT = "DESKTOP_NAMESPACE_PROBE_OK"
@@ -244,7 +244,7 @@ def run(args):
         work = Path(temporary)
         try:
             if args.live:
-                from cursor_bridge.sdk_backend import SDKBackend
+                from cursor_sdk_bridge.sdk_backend import SDKBackend
                 backend = SDKBackend(args.key_file, work / "sdk-workspace", args.timeout)
             else:
                 backend = StubSDK()

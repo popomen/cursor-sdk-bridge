@@ -13,11 +13,11 @@ import unittest
 from unittest.mock import patch
 import urllib.parse
 
-from cursor_bridge import claude_switch
-from cursor_bridge import dashboard
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.request_log import REQUEST_STATS, RequestLog
-from cursor_bridge.sdk_backend import DEFAULT_QUEUE_TIMEOUT, DEFAULT_TIMEOUTS, SDKBackend
+from cursor_sdk_bridge import claude_switch
+from cursor_sdk_bridge import dashboard
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.request_log import REQUEST_STATS, RequestLog
+from cursor_sdk_bridge.sdk_backend import DEFAULT_QUEUE_TIMEOUT, DEFAULT_TIMEOUTS, SDKBackend
 
 NL = chr(10)
 NOW = datetime.now().astimezone()
@@ -232,7 +232,7 @@ class LedgerMeasurementTests(unittest.TestCase):
 
     def test_disconnect_continue_join_and_completed_retry_do_not_duplicate_usage(self):
         wire = json.dumps({**self.body, 'stream': True}).encode()
-        with patch('cursor_bridge.cursor_sdk2api.KEEPALIVE_SECONDS', .01):
+        with patch('cursor_sdk_bridge.cursor_sdk2api.KEEPALIVE_SECONDS', .01):
             connection = socket.create_connection(('127.0.0.1', self.server.server_port), timeout=3)
             try:
                 connection.sendall(b'POST /v1/responses HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: '
@@ -345,7 +345,7 @@ class RestartTests(unittest.TestCase):
         board = self.board((CURRENT, None))
         board.health_reader = lambda port: (None, 'URLError') if self.calls else (CURRENT, None)
         result = board.restart('claude')
-        self.assertEqual((result['result'], self.calls), ('failed', ['cursor-bridge-claude.service']))
+        self.assertEqual((result['result'], self.calls), ('failed', ['cursor-sdk-bridge-claude.service']))
         self.assertIn('没有恢复', result['message'])
 
     def test_busy_instances_and_unknown_names_are_not_restarted(self):
@@ -401,7 +401,7 @@ class RestartTests(unittest.TestCase):
         board = self.board((CURRENT, None))
         board.version_reader = lambda: 'expected-commit'
         self.assertEqual(board.restart('claude')['result'], 'failed')
-        self.assertEqual(self.calls, ['cursor-bridge-claude.service'])
+        self.assertEqual(self.calls, ['cursor-sdk-bridge-claude.service'])
 
     def test_missing_release_identity_refuses_before_draining(self):
         for missing in ('running', 'deployed'):
@@ -528,7 +528,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn('form-action', headers['Content-Security-Policy'])
         self.assertIn(self.board.token, page)
-        self.assertIn('确认重启 cursor-bridge-codex.service', page)
+        self.assertIn('确认重启 cursor-sdk-bridge-codex.service', page)
         status, _, page = self.get('/restart?instance=claude')
         self.assertEqual(status, 200)
         self.assertNotIn(self.board.token, page)
@@ -548,10 +548,10 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.restarts, [])
         status, headers, _ = self.post(good, {'Origin': 'http://localhost:64517', 'Sec-Fetch-Site': 'same-origin'})
         self.assertEqual((status, headers['Location']), (303, '/'))
-        self.assertEqual(self.restarts, ['cursor-bridge-codex.service'])
-        self.assertIn('已重启 cursor-bridge-codex.service，/health 已恢复。', self.get('/')[2])
+        self.assertEqual(self.restarts, ['cursor-sdk-bridge-codex.service'])
+        self.assertIn('已重启 cursor-sdk-bridge-codex.service，/health 已恢复。', self.get('/')[2])
         self.assertEqual(self.post({**good, 'instance': 'claude'})[0], 303)
-        self.assertEqual(self.restarts, ['cursor-bridge-codex.service'])
+        self.assertEqual(self.restarts, ['cursor-sdk-bridge-codex.service'])
         snapshot = json.loads(self.get('/api/status')[2])
         self.assertEqual((snapshot['last_action']['instance'], snapshot['last_action']['result']), ('claude', 'refused'))
 

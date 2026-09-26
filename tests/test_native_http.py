@@ -5,8 +5,8 @@ import tempfile
 import threading
 import unittest
 
-from cursor_bridge.cursor_sdk2api import Service, make_server
-from cursor_bridge.native_backend import NativeSDKBackend
+from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.native_backend import NativeSDKBackend
 from test_native_backend import FakeSdk, MODEL, TOOL
 
 
