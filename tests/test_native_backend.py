@@ -80,6 +80,9 @@ class FakeAgent:
         return run
 
     async def close(self):
+        if self.client.close_gate is not None:
+            self.client.close_started.set()
+            await self.client.close_gate.wait()
         self.closed = True
 
 
@@ -91,6 +94,7 @@ class FakeSdk:
         self.scripts = []
         self.full, self.wrong_model, self.resume_error, self.send_error = True, False, False, False
         self.auth_error, self.auth_invalid, self.auth_probes = False, False, 0
+        self.close_gate, self.close_started = None, asyncio.Event()
 
     async def create(self, options):
         if self.auth_error:
@@ -144,9 +148,9 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         stats = {}
         context = REQUEST_STATS.set(stats)
         try:
-            text = await self.backend.generate_request(MODEL, prompt, body, history,
+            text = await self.backend.generate_request(body["model"], prompt, body, history,
                 images=images, on_event=events.append if events is not None else None)
-            response = complete_response(response_shell(MODEL), text, body, history)
+            response = complete_response(response_shell(body["model"]), text, body, history)
             if commit:
                 self.assertTrue(self.backend.commit_response(history, body, response, text.reuse_token))
             return response, stats, text
@@ -230,6 +234,36 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["replayed_tools"], 2)
         self.assertEqual([value["content"][0]["text"] for value in self.sdk.callback_results], ["saved-0", "saved-1"])
 
+    async def test_new_user_cold_turn_can_repeat_a_historical_tool(self):
+        history = [{"role": "user", "content": "look up the value"},
+            {"type": "function_call", "call_id": "historical", "name": "lookup", "arguments": '{"key":"same"}'},
+            {"type": "function_call_output", "call_id": "historical", "output": "old result"},
+            {"role": "assistant", "content": "The previous lookup is complete."},
+            {"role": "user", "content": "Run lookup with key same again to obtain a fresh value."}]
+        self.sdk.scripts = [[("tools", [("lookup", {"key": "same"})]), ("text", "fresh result")]]
+        response, stats, _ = await self.turn(history, tools=[TOOL])
+        self.assertEqual(response["output"][0]["type"], "function_call")
+        self.assertNotIn("replayed_tools", stats)
+        self.assertEqual(self.sdk.callback_results, [])
+        call = response["output"][0]
+        self.assertNotEqual(call["call_id"], "historical")
+        history += response["output"] + [{"type": "function_call_output", "call_id": call["call_id"], "output": "new result"}]
+        final, _, _ = await self.turn(history, tools=[TOOL])
+        self.assertEqual(final["output"][0]["content"][0]["text"], "fresh result")
+
+    async def test_new_user_without_old_assistant_snapshot_still_gets_fresh_tool(self):
+        # A client may compact away the previous terminal assistant message.
+        # Ending in new user input is not a tool-result-only recovery request.
+        history = [{"role": "user", "content": "old task"},
+            {"type": "function_call", "call_id": "historical", "name": "lookup", "arguments": '{"key":"same"}'},
+            {"type": "function_call_output", "call_id": "historical", "output": "old result"},
+            {"role": "user", "content": "Perform lookup key same again."}]
+        self.sdk.scripts = [[("tools", [("lookup", {"key": "same"})]), ("text", "done")]]
+        response, stats, text = await self.turn(history, tools=[TOOL], commit=False)
+        self.assertEqual(response["output"][0]["type"], "function_call")
+        self.assertNotIn("replayed_tools", stats)
+        self.backend.discard_response(text.reuse_token)
+
     async def test_pending_expiry_releases_lock_and_late_result_recovers_cold(self):
         self.backend.pending_timeout = 0.03
         self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "expired")],
@@ -255,11 +289,71 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         partial = history + calls + [{"type": "function_call_output", "call_id": calls[0]["call_id"], "output": "a"}]
         with self.assertRaises(InvalidRequest):
             await self.turn(partial, tools=[TOOL])
+        with self.assertRaises(InvalidRequest):
+            await self.turn(partial, tools=[TOOL], instructions="changed policy")
         self.assertEqual(self.backend.progress()["pending_tools"], 2)
         complete = partial + [{"type": "function_call_output", "call_id": calls[1]["call_id"], "output": "b"}]
-        with self.assertRaises(InvalidRequest):
-            await self.turn(complete, tools=[TOOL], instructions="changed policy")
         await self.turn(complete, tools=[TOOL])
+
+    async def test_expired_result_waits_for_old_cleanup_then_recovers(self):
+        self.backend.pending_timeout = 0.03
+        self.sdk.close_gate = asyncio.Event()
+        async def hold_before_cleanup(error):
+            self.sdk.close_started.set()
+            await self.sdk.close_gate.wait()
+        self.backend._probe_auth_failure = hold_before_cleanup
+        self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "expired")],
+                            [("tools", [("lookup", {"key": "a"})]), ("text", "recovered")]]
+        history = [{"role": "user", "content": "expiry race"}]
+        first, _, _ = await self.turn(history, tools=[TOOL])
+        history += first["output"] + [{"type": "function_call_output",
+            "call_id": first["output"][0]["call_id"], "output": "saved"}]
+        await asyncio.wait_for(self.sdk.close_started.wait(), 1)
+        continuation = asyncio.create_task(self.turn(history, tools=[TOOL]))
+        try:
+            await asyncio.sleep(0.01)
+            self.assertFalse(continuation.done())
+            self.sdk.close_gate.set()
+            final, stats, _ = await asyncio.wait_for(continuation, 1)
+            self.assertEqual(stats["reuse_reason"], "expired_pending_recovery")
+            self.assertEqual(stats["replayed_tools"], 1)
+            self.assertEqual(final["output"][0]["content"][0]["text"], "recovered")
+        finally:
+            self.sdk.close_gate.set()
+            if not continuation.done():
+                continuation.cancel()
+            await asyncio.gather(continuation, return_exceptions=True)
+
+    async def test_tool_result_may_change_forced_choice_to_none(self):
+        self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "old run")],
+                            [("text", "new policy complete")]]
+        history = [{"role": "user", "content": "forced call then answer"}]
+        first, _, _ = await self.turn(history, tools=[TOOL], tool_choice={"type": "function", "name": "lookup"})
+        history += first["output"] + [{"type": "function_call_output",
+            "call_id": first["output"][0]["call_id"], "output": "complete"}]
+        final, stats, _ = await self.turn(history, tools=[TOOL], tool_choice="none")
+        self.assertEqual(stats["reuse_reason"], "tool_continuation_policy_changed")
+        self.assertTrue(self.sdk.runs[0].cancelled)
+        self.assertEqual(self.sdk.created[-1].options.tools, [])
+        self.assertEqual(final["output"][0]["content"][0]["text"], "new policy complete")
+
+    async def test_changed_policy_rebuilds_after_validating_results_and_replays(self):
+        for changed in ({"instructions": "new instructions"}, {"parallel_tool_calls": False},
+                        {"tools": [{**TOOL, "description": "changed description"}]},
+                        {"model": "claude-opus-5-5-max"}):
+            with self.subTest(changed=changed):
+                self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "old")],
+                                    [("tools", [("lookup", {"key": "a"})]), ("text", "reconstructed")]]
+                history = [{"role": "user", "content": "changed policy " + str(len(self.sdk.created))}]
+                first, _, _ = await self.turn(history, tools=[TOOL])
+                history += first["output"] + [{"type": "function_call_output",
+                    "call_id": first["output"][0]["call_id"], "output": "saved execution"}]
+                options = {"tools": [TOOL], **changed}
+                final, stats, _ = await self.turn(history, **options)
+                self.assertEqual(stats["reuse_reason"], "tool_continuation_policy_changed")
+                self.assertEqual(stats["replayed_tools"], 1)
+                self.assertEqual(final["output"][0]["type"], "message")
+                await self.idle()
 
     async def test_branch_is_cold_after_first_successor_claim(self):
         self.sdk.scripts = [[("text", "parent")], [("text", "branch a")], [("text", "branch b")]]

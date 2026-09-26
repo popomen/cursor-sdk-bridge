@@ -1,0 +1,43 @@
+{
+  "timestamp_utc": "2026-09-26T11:10:33.090159+00:00",
+  "release": "45e19e5ef31ca80272aa1f9a2c828f6ac5934d2d",
+  "port": 18790,
+  "mode": "native",
+  "scope": "temporary-port image acceptance",
+  "effort": "high",
+  "sdk_outputs": 2,
+  "image_sources": [
+    "user_message",
+    "function_call_output"
+  ],
+  "success": true,
+  "elapsed_s": 25.984,
+  "calls": [
+    {
+      "model": "claude-opus-5-5-high",
+      "outcome": "completed",
+      "duration_s": 14.532,
+      "images": null,
+      "usage": {
+        "input_tokens": 3459,
+        "output_tokens": 8,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 3455
+      },
+      "reuse_mode": "cold"
+    },
+    {
+      "model": "claude-opus-5-5-high",
+      "outcome": "completed",
+      "duration_s": 11.429,
+      "images": null,
+      "usage": {
+        "input_tokens": 3572,
+        "output_tokens": 9,
+        "cache_read_tokens": 2374,
+        "cache_write_tokens": 1194
+      },
+      "reuse_mode": "cold"
+    }
+  ]
+}

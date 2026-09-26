@@ -1,0 +1,198 @@
+{
+  "schema": 1,
+  "created_at": "2026-09-26T11:09:54.334316+00:00",
+  "live": true,
+  "run_id": "29f482f763144cce9f60f4fcddb8cd76",
+  "model": "claude-opus-5-5-high",
+  "rows": 1200,
+  "turns_per_mode": 3,
+  "corpus_sha256": "5e07980b005e30d4cc4d3cea1d57e54515da4c738aa24ec5771694c4176774e8",
+  "endpoints": {
+    "legacy": "http://127.0.0.1:18789/v1/responses",
+    "new": "http://127.0.0.1:18790/v1/responses"
+  },
+  "method": {
+    "order": "interleaved, alternating first endpoint by turn",
+    "previous_response_id": false,
+    "same_seed_and_initial_history": true,
+    "dedup_avoidance": "fresh shared run ID in initial input",
+    "prompt_bytes_basis": "full prepare_request prompt, not the SDK's smaller resumed send",
+    "retained_data": "metadata only; no model output, thinking, input text or raw errors"
+  },
+  "estimate": {
+    "live": false,
+    "model": "claude-opus-5-5-high",
+    "rows": 1200,
+    "turns_per_mode": 3,
+    "sdk_requests_max": 6,
+    "first_turn_prompt_bytes": 113159,
+    "estimated_first_turn_input_tokens": {
+      "min": 22632,
+      "max": 37720
+    },
+    "estimated_total_context_input_tokens": {
+      "min": 135792,
+      "max": 226320
+    },
+    "estimate_basis": "UTF-8 prompt bytes / 5 to bytes / 3; approximate, not a tokenizer or billing quote",
+    "quota_note": "Two long initial turns plus follow-ups; cache billing and hidden reasoning vary. Output asks for one short check code per request. --live explicitly starts inference."
+  },
+  "turns": [
+    {
+      "mode": "legacy",
+      "turn": 1,
+      "completed": true,
+      "output_matches": true,
+      "event_count": 13,
+      "request_bytes": 112136,
+      "prompt_bytes": 113219,
+      "first_content_s": 41.86458,
+      "first_text_s": 41.86458,
+      "first_thinking_s": null,
+      "completion_s": 41.864688,
+      "duration_s": 41.864902,
+      "streamed_before_completion": false,
+      "usage": {
+        "input_tokens": 54709,
+        "output_tokens": 37,
+        "cache_read_tokens": 2374,
+        "cache_write_tokens": null
+      },
+      "error_type": null
+    },
+    {
+      "mode": "new",
+      "turn": 1,
+      "completed": true,
+      "output_matches": true,
+      "event_count": 13,
+      "request_bytes": 112136,
+      "prompt_bytes": 113219,
+      "first_content_s": 31.138382,
+      "first_text_s": 31.138382,
+      "first_thinking_s": null,
+      "completion_s": 33.223474,
+      "duration_s": 33.22369,
+      "streamed_before_completion": true,
+      "usage": {
+        "input_tokens": 54456,
+        "output_tokens": 18,
+        "cache_read_tokens": 2374,
+        "cache_write_tokens": null
+      },
+      "error_type": null
+    },
+    {
+      "mode": "new",
+      "turn": 2,
+      "completed": true,
+      "output_matches": true,
+      "event_count": 10,
+      "request_bytes": 112426,
+      "prompt_bytes": 113509,
+      "first_content_s": 5.897872,
+      "first_text_s": 5.897872,
+      "first_thinking_s": null,
+      "completion_s": 9.996217,
+      "duration_s": 9.996477,
+      "streamed_before_completion": true,
+      "usage": {
+        "input_tokens": 54723,
+        "output_tokens": 18,
+        "cache_read_tokens": 54452,
+        "cache_write_tokens": null
+      },
+      "error_type": null
+    },
+    {
+      "mode": "legacy",
+      "turn": 2,
+      "completed": true,
+      "output_matches": true,
+      "event_count": 10,
+      "request_bytes": 112426,
+      "prompt_bytes": 113509,
+      "first_content_s": 14.953196,
+      "first_text_s": 14.953196,
+      "first_thinking_s": null,
+      "completion_s": 14.953287,
+      "duration_s": 14.953513,
+      "streamed_before_completion": false,
+      "usage": {
+        "input_tokens": 54846,
+        "output_tokens": 37,
+        "cache_read_tokens": 2374,
+        "cache_write_tokens": null
+      },
+      "error_type": null
+    },
+    {
+      "mode": "legacy",
+      "turn": 3,
+      "completed": true,
+      "output_matches": true,
+      "event_count": 11,
+      "request_bytes": 112716,
+      "prompt_bytes": 113799,
+      "first_content_s": 26.5248,
+      "first_text_s": 26.5248,
+      "first_thinking_s": null,
+      "completion_s": 26.524947,
+      "duration_s": 26.52505,
+      "streamed_before_completion": false,
+      "usage": {
+        "input_tokens": 54989,
+        "output_tokens": 37,
+        "cache_read_tokens": 2907,
+        "cache_write_tokens": null
+      },
+      "error_type": null
+    },
+    {
+      "mode": "new",
+      "turn": 3,
+      "completed": true,
+      "output_matches": true,
+      "event_count": 11,
+      "request_bytes": 112716,
+      "prompt_bytes": 113799,
+      "first_content_s": 12.495018,
+      "first_text_s": 12.495018,
+      "first_thinking_s": null,
+      "completion_s": 16.47704,
+      "duration_s": 16.477201,
+      "streamed_before_completion": true,
+      "usage": {
+        "input_tokens": 54990,
+        "output_tokens": 18,
+        "cache_read_tokens": 54719,
+        "cache_write_tokens": null
+      },
+      "error_type": null
+    }
+  ],
+  "summary": {
+    "outcome": "demonstrated",
+    "all_turns_completed_and_matched": true,
+    "followup_medians": {
+      "legacy": {
+        "followup_cache_read_tokens": 2640.5,
+        "followup_duration_s": 20.7392815
+      },
+      "new": {
+        "followup_cache_read_tokens": 54585.5,
+        "followup_duration_s": 13.236839
+      }
+    },
+    "cache_improvement_demonstrated": true,
+    "duration_improvement_demonstrated": true,
+    "streaming_demonstrated": true,
+    "thresholds": {
+      "cache_min_ratio": 2,
+      "cache_min_gain_tokens": 1000,
+      "duration_max_ratio": 0.9,
+      "stream_content_lead_min_s": 0.1
+    },
+    "limitation": "One synthetic comparison is descriptive, not statistical proof; cache warmup, network and reasoning variance may affect results. No improvement is assumed."
+  }
+}
