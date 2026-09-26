@@ -1,0 +1,118 @@
+{
+  "check": "existing_claude_session_recovery",
+  "observed_at": "2026-09-26T15:36:23.774614+00:00",
+  "release": "1eaebaa01c55d164b9418657c4639439eb8c7811",
+  "session_id": "69d1e63f-1940-49a5-ada2-4beaa4e93c62",
+  "same_session": true,
+  "same_process": true,
+  "pid": 4081351,
+  "authorized_input": "\u7ee7\u7eed",
+  "input_recorded_at": "2026-09-26T15:32:13.509Z",
+  "passed": true,
+  "job_state": "working",
+  "job_left_running": true,
+  "completed_requests": 7,
+  "successful_tool_continuations": 6,
+  "new_api_errors": 0,
+  "new_message_types": {
+    "file-history-snapshot": 1,
+    "user": 8,
+    "attachment": 2,
+    "assistant": 13,
+    "last-prompt": 3,
+    "ai-title": 3,
+    "agent-name": 3,
+    "mode": 3,
+    "permission-mode": 3,
+    "atis-latch": 3
+  },
+  "new_content_block_types": {
+    "thinking": 4,
+    "text": 2,
+    "tool_use": 7,
+    "tool_result": 7
+  },
+  "requests": [
+    {
+      "ts": "2026-09-26T23:33:47.287+08:00",
+      "event": "http",
+      "api": "messages",
+      "model": "claude-opus-5-5-xhigh",
+      "input_items": 211,
+      "prompt_bytes": 981675,
+      "reuse_mode": "cold",
+      "outcome": "completed",
+      "duration_s": 90.091
+    },
+    {
+      "ts": "2026-09-26T23:33:49.419+08:00",
+      "event": "http",
+      "api": "messages",
+      "model": "claude-opus-5-5-xhigh",
+      "input_items": 214,
+      "prompt_bytes": 994072,
+      "reuse_mode": "tool_continuation",
+      "outcome": "completed",
+      "duration_s": 1.495
+    },
+    {
+      "ts": "2026-09-26T23:35:01.946+08:00",
+      "event": "http",
+      "api": "messages",
+      "model": "claude-opus-5-5-xhigh",
+      "input_items": 216,
+      "prompt_bytes": 1009019,
+      "reuse_mode": "tool_continuation",
+      "outcome": "completed",
+      "duration_s": 72.261
+    },
+    {
+      "ts": "2026-09-26T23:35:04.827+08:00",
+      "event": "http",
+      "api": "messages",
+      "model": "claude-opus-5-5-xhigh",
+      "input_items": 219,
+      "prompt_bytes": 1015619,
+      "reuse_mode": "tool_continuation",
+      "outcome": "completed",
+      "duration_s": 2.626
+    },
+    {
+      "ts": "2026-09-26T23:35:16.344+08:00",
+      "event": "http",
+      "api": "messages",
+      "model": "claude-opus-5-5-xhigh",
+      "input_items": 221,
+      "prompt_bytes": 1021295,
+      "reuse_mode": "tool_continuation",
+      "outcome": "completed",
+      "duration_s": 11.319
+    },
+    {
+      "ts": "2026-09-26T23:35:30.215+08:00",
+      "event": "http",
+      "api": "messages",
+      "model": "claude-opus-5-5-xhigh",
+      "input_items": 223,
+      "prompt_bytes": 1022404,
+      "reuse_mode": "tool_continuation",
+      "outcome": "completed",
+      "duration_s": 8.656
+    },
+    {
+      "ts": "2026-09-26T23:35:52.675+08:00",
+      "event": "http",
+      "api": "messages",
+      "model": "claude-opus-5-5-xhigh",
+      "input_items": 225,
+      "prompt_bytes": 1037654,
+      "reuse_mode": "tool_continuation",
+      "outcome": "completed",
+      "duration_s": 22.203
+    }
+  ],
+  "root_cause": "The pending-tool validator rejected valid system context appended by Claude Code after a tool result. Earlier history rewrites also required validated reconstruction.",
+  "fix": "Keep strict pending-call/result validation, cancel and clean up the paused run, reconstruct with all valid context messages and replay completed tool results.",
+  "targeted_system_context_acceptance": "messages-system-context-20260926.json",
+  "observational_limit": "The restored original session completed multiple tool continuations with no new API error. A fresh system-tail reconstruction was proven by the separate synthetic live probe, not inferred from these ordinary continuations."
+}

@@ -1,74 +1,140 @@
 {
-  "timestamp_utc": "2026-09-26T11:42:41.449170+00:00",
-  "forceReload": true,
-  "cwd": "/data00/home/zhudelin123/source/zhudelin123-skills",
-  "skills": [
-    {
-      "name": "cc-bp-bg-ultra",
-      "enabled": true,
-      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/cc-bp-bg-ultra/SKILL.md",
-      "source_matches": true
-    },
-    {
-      "name": "cc-bp-bg-ultra-review",
-      "enabled": true,
-      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/cc-bp-bg-ultra-review/SKILL.md",
-      "source_matches": true
-    },
+  "schema_version": 1,
+  "check": "legacy_cleanup_and_byted_skill_discovery",
+  "generated_at": "2026-09-26T15:34:48.742031+00:00",
+  "evidence_source": "Previously completed read-only filesystem, systemd, /proc and live app-server skills/list inspections; no checks rerun while writing this receipt.",
+  "filesystem_and_unit_snapshot_at": "2026-09-26T23:29:27+08:00",
+  "passed": true,
+  "removed_skills": [
     {
       "name": "codex-appserver-switch",
-      "enabled": true,
-      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/codex-appserver-switch/SKILL.md",
-      "source_matches": true
-    },
-    {
-      "name": "codex-cursor-fallback",
-      "enabled": true,
-      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/codex-cursor-fallback/SKILL.md",
-      "source_matches": true
-    },
-    {
-      "name": "cursor-bridge-ops",
-      "enabled": true,
-      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/cursor-bridge-ops/SKILL.md",
-      "source_matches": true
-    },
-    {
-      "name": "devbox-seedreplay-handbook",
-      "enabled": true,
-      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/devbox-seedreplay-handbook/SKILL.md",
-      "source_matches": true
-    },
-    {
-      "name": "i-have-adhd",
-      "enabled": true,
-      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/i-have-adhd/SKILL.md",
-      "source_matches": true
+      "directory": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/codex-appserver-switch",
+      "directory_exists": false
     },
     {
       "name": "super-relay-model-health",
-      "enabled": true,
-      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/super-relay-model-health/SKILL.md",
-      "source_matches": true
+      "directory": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/super-relay-model-health",
+      "directory_exists": false
+    },
+    {
+      "name": "codex-cursor-fallback",
+      "directory": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/codex-cursor-fallback",
+      "directory_exists": false
     }
   ],
-  "error_count": 0,
-  "skills_repository_commit": "adabc6deb89cbd6e75b6a59b4f259e444a7954ed",
-  "publication": {
-    "local_head_matches_origin_main": true,
-    "remote_main_matches": true,
-    "worktree_clean": true
+  "old_skill_tracked_file_count": 76,
+  "ignored_cursor_probe_binary_exists": false,
+  "skill_discovery": {
+    "method": "skills/list",
+    "forceReload": true,
+    "cwd": "/data00/home/zhudelin123/source/zhudelin123-skills",
+    "enabled_byted_skill_count": 5,
+    "error_count": 0,
+    "skills": [
+      {
+        "name": "cc-bp-bg-ultra",
+        "enabled": true,
+        "source_path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/cc-bp-bg-ultra/SKILL.md"
+      },
+      {
+        "name": "cc-bp-bg-ultra-review",
+        "enabled": true,
+        "source_path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/cc-bp-bg-ultra-review/SKILL.md"
+      },
+      {
+        "name": "cursor-bridge-ops",
+        "enabled": true,
+        "source_path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/cursor-bridge-ops/SKILL.md"
+      },
+      {
+        "name": "devbox-seedreplay-handbook",
+        "enabled": true,
+        "source_path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/devbox-seedreplay-handbook/SKILL.md"
+      },
+      {
+        "name": "i-have-adhd",
+        "enabled": true,
+        "source_path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/i-have-adhd/SKILL.md"
+      }
+    ],
+    "removed_skill_names_absent": true,
+    "bundle_symlinks_preserved": [
+      "/home/zhudelin123/.codex/skills/byted-devbox-skills",
+      "/home/zhudelin123/.agents/skills/byted-devbox-skills"
+    ],
+    "bundle_target": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills"
   },
-  "validation": {
-    "structure_validated": 4,
-    "fallback_tests": 190,
-    "old_appserver_tests": 4,
-    "archived_bridge_tests": 34,
-    "old_health_tests": 122,
-    "go_test": "passed with installed go1.25.4",
-    "go_build": "passed to temporary output",
-    "repository_lint_errors": 0,
-    "repository_lint_existing_warnings": 1
+  "old_units": {
+    "checked_names": [
+      "cursor-sdk2api.service",
+      "cursor-sdk2api-claude.service",
+      "cursor-sdk2api-dashboard.service",
+      "super-relay-health.service",
+      "super-relay-extra-health.service",
+      "super-relay-health.timer",
+      "super-relay-extra-health.timer",
+      "super-relay-cursor-health.timer",
+      "super-relay-cursor-health.service",
+      "super-relay-dashboard.service",
+      "super-relay-cursor-bridge.service",
+      "super-relay-filter-cursor.service",
+      "super-relay-filter-traex.service",
+      "cursor-bridge.service"
+    ],
+    "load_state_for_all": "not-found",
+    "active_state_for_all": "inactive",
+    "fragment_paths_for_all": "",
+    "live_service_pids": [],
+    "note": "This records their verified absence after cleanup, not a claim that every name had an installed unit file."
   },
-  "remaining_cleanup": "Fallback scripts/assets/references remain solely for this migration rollback until the user-operated Codex switch and new-task acceptance pass."
+  "legacy_ports": {
+    "checked_tcp_ports": [
+      8327,
+      8391,
+      8392,
+      8788
+    ],
+    "listening_tcp_ports": [],
+    "sources": [
+      "/proc/net/tcp",
+      "/proc/net/tcp6"
+    ]
+  },
+  "old_runtime_dependencies": {
+    "old_code_process_references": [],
+    "old_startup_file_references": [],
+    "skills_repository_old_name_references": []
+  },
+  "independent_repository_cleanup": {
+    "docs_archive_exists": false,
+    "retired_spike_files_compatibility_shells_and_duplicate_requirements_present": false
+  },
+  "preservation": {
+    "private_paths_verified_present": [
+      "~/.codex/auth.json",
+      "~/.codex/cursor-sdk-api-key",
+      "~/.codex/super-relay-api-key",
+      "~/.codex/cursor-sdk2api",
+      "~/.codex/cursor-sdk2api-claude",
+      "~/.codex/cursor-fallback-state",
+      "~/.codex/super-relay-monitor",
+      "~/.cursor-bridge",
+      "~/.local/bin/codex.bak-cursor-switch"
+    ],
+    "top_level_codex_backup_files_preserved": 36,
+    "immutable_releases_preserved": 7,
+    "policy": "Keep private state, credentials, backups, legacy workspace data, unrelated links and rollback releases; no contents or credentials are included."
+  },
+  "limits": [
+    "No production running-version assertion is included; the earlier 491df54 snapshot is superseded.",
+    "No inference, service mutations or repository edits were performed for this receipt.",
+    "Filesystem presence and absence are observations from the recorded audit, not an exhaustive audit of unrelated user files."
+  ],
+  "task_scratch_removed_at": "2026-09-26T15:35:38.884208+00:00",
+  "task_scratch_absent": [
+    "/tmp/cursor-bridge-skill-draft",
+    "/tmp/cursor-bridge-safe-cutover.py",
+    "/tmp/cursor-bridge-claude-bg-accept.py",
+    "/tmp/cursor-sdk-bridge-main.bundle"
+  ]
 }

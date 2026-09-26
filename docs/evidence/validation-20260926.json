@@ -1,18 +1,25 @@
 {
-  "source_commit": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+  "source_commit": "1eaebaa01c55d164b9418657c4639439eb8c7811",
   "command": "PYTHONDONTWRITEBYTECODE=1 ~/.codex/cursor-sdk2api/venv/bin/python -m unittest discover -s tests -p 'test_*.py'",
-  "tests": 322,
+  "tests": 332,
   "passed": true,
-  "duration_s": 45.157,
+  "duration_s": 46.474,
   "modes_covered": [
     "legacy",
     "reuse",
     "native"
   ],
-  "systemd_validation": "Generated unit text also passed the real systemd-analyze --user verify parser, including paths with spaces and percent specifiers.",
-  "pending_acceptance": [
-    "Codex default-provider new task after user-operated daemon switch",
-    "Delete temporarily retained fallback rollback resources after Codex acceptance",
-    "Publish cursor-bridge to an accessible remote repository"
-  ]
+  "systemd_validation": "Immutable release installation passed dependency checks and the real systemd user-unit parser.",
+  "live_acceptance": {
+    "messages_changed_history": "messages-recovery-20260926.json",
+    "messages_system_context": "messages-system-context-20260926.json",
+    "codex_new_task": "codex-new-task-20260926.json",
+    "claude_cli": "claude-p-20260926.json",
+    "claude_background": "claude-bg-20260926.json",
+    "images": "images-20260926.json",
+    "long_history_comparison": "comparison-20260926.json",
+    "existing_claude_session": "claude-session-recovery-20260926.json"
+  },
+  "codex_default_provider": "openai",
+  "codex_provider_scope": "The user switched the default to Cursor and restored OpenAI. The real new-task receipt explicitly selects Cursor without changing that restored default."
 }
