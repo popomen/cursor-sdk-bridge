@@ -28,6 +28,8 @@ Native callback Futures and run consumers outlive a public tool-call response. P
 
 If a client edits earlier history while returning a pending batch, the bridge first verifies every pending call's ID, name, argument types and result. It then retires that paused run and rebuilds from the updated history. Incomplete or altered pending calls are rejected without consuming their results.
 
+Claude Code can append system context, including task reminders, after tool results. These valid messages also require reconstruction because an SDK callback cannot carry a separate conversation message. The bridge preserves that context and replays completed tools.
+
 ## Streaming and operations
 
 Live deltas use stable item IDs through final responses and durable replay. A partial stream that fails ends with an error, never a fabricated completion. Responses events follow the [OpenAI streaming guide](https://developers.openai.com/api/docs/guides/streaming-responses); Messages emits thinking/text content-block deltas. The bridge does not fabricate upstream reasoning signatures; a local empty signature accompanies synthesized Messages thinking blocks and is ignored on input.

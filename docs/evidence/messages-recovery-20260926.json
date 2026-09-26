@@ -1,0 +1,66 @@
+{
+  "check": "messages_changed_history_recovery",
+  "running_version": "491df54d732506d842259548eac112842630d7d8",
+  "model": "claude-opus-5-5-high",
+  "passed": true,
+  "automatic_retry": false,
+  "synthetic_external_tool_effects": 0,
+  "records": [
+    {
+      "ts": "2026-09-26T23:14:18.225+08:00",
+      "event": "inference",
+      "model": "claude-opus-5-5-high",
+      "engine": "native",
+      "reuse_mode": "cold",
+      "reuse_reason": "no_direct_successor",
+      "outcome": "completed",
+      "duration_s": 48.319
+    },
+    {
+      "ts": "2026-09-26T23:14:18.226+08:00",
+      "event": "http",
+      "model": "claude-opus-5-5-high",
+      "engine": "native",
+      "reuse_mode": "cold",
+      "reuse_reason": "no_direct_successor",
+      "outcome": "completed",
+      "duration_s": 48.324
+    },
+    {
+      "ts": "2026-09-26T23:15:09.025+08:00",
+      "event": "inference",
+      "model": "claude-opus-5-5-high",
+      "engine": "native",
+      "reuse_mode": "cold",
+      "reuse_reason": "tool_continuation_history_changed",
+      "usage": {
+        "input_tokens": 3406,
+        "output_tokens": 27,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 3402
+      },
+      "outcome": "completed",
+      "duration_s": 50.795
+    },
+    {
+      "ts": "2026-09-26T23:15:09.027+08:00",
+      "event": "http",
+      "model": "claude-opus-5-5-high",
+      "engine": "native",
+      "reuse_mode": "cold",
+      "reuse_reason": "tool_continuation_history_changed",
+      "usage": {
+        "input_tokens": 3406,
+        "output_tokens": 27,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 3402
+      },
+      "outcome": "completed",
+      "duration_s": 50.8
+    }
+  ],
+  "sdk_outputs": 2,
+  "tool_roundtrip": true,
+  "changed_history_rebuilt": true,
+  "duration_s": 100.883
+}

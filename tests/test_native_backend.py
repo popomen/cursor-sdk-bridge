@@ -623,21 +623,25 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["output"][0]["content"][0]["text"], "done")
         self.assertEqual(len(self.sdk.sent), 1)
 
-    async def test_extra_user_input_rebuilds_and_replays_completed_tool(self):
-        self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "discarded")],
-                            [("tools", [("lookup", {"key": "a"})]), ("text", "new instructions followed")]]
-        history = [{"role": "user", "content": "initial"}]
-        first, _, _ = await self.turn(history, tools=[TOOL])
-        history += first["output"] + [{"type": "function_call_output",
-            "call_id": first["output"][0]["call_id"], "output": "completed"},
-            {"role": "user", "content": "<system-reminder>new user content</system-reminder>"}]
-        final, stats, _ = await self.turn(history, tools=[TOOL])
-        self.assertEqual(stats["reuse_reason"], "tool_results_with_new_user_input")
-        self.assertEqual(stats["replayed_tools"], 1)
-        self.assertEqual(len(self.sdk.sent), 2)
-        self.assertIn("new user content", self.sdk.sent[-1][1])
-        self.assertTrue(self.sdk.runs[0].cancelled)
-        self.assertEqual(final["output"][0]["type"], "message")
+    async def test_extra_context_rebuilds_and_replays_completed_tool(self):
+        for role in ("user", "assistant", "system", "developer"):
+            with self.subTest(role=role):
+                self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "discarded")],
+                                    [("tools", [("lookup", {"key": "a"})]), ("text", "new context followed")]]
+                sent = len(self.sdk.sent)
+                history = [{"role": "user", "content": "initial"}]
+                first, _, _ = await self.turn(history, tools=[TOOL])
+                history += first["output"] + [{"type": "function_call_output",
+                    "call_id": first["output"][0]["call_id"], "output": "completed"},
+                    {"role": role, "content": "<system-reminder>new context</system-reminder>"}]
+                final, stats, _ = await self.turn(history, tools=[TOOL])
+                self.assertEqual(stats["reuse_reason"], "tool_results_with_new_context")
+                self.assertEqual(stats["replayed_tools"], 1)
+                self.assertEqual(len(self.sdk.sent) - sent, 2)
+                self.assertIn("new context", self.sdk.sent[-1][1])
+                self.assertTrue(self.sdk.runs[-2].cancelled)
+                self.assertEqual(final["output"][0]["type"], "message")
+                await self.idle()
 
     async def test_disabled_parallel_returns_one_callback_per_response(self):
         self.sdk.scripts = [[("tools", [("lookup", {"key": "a"}), ("lookup", {"key": "b"})]), ("text", "done")]]

@@ -272,10 +272,8 @@ class NativeSDKBackend(SDKBackend):
                     for _, item in calls):
                 raise InvalidRequest("Tool continuation must preserve the pending calls", code="pending_calls_changed")
             tail = history[calls[-1][0] + 1:]
-        if not tail or any(item.get("type", "message") != "function_call_output"
-                and not (item.get("type", "message") == "message" and item.get("role") == "user")
-                for item in tail):
-            raise InvalidRequest("Tool continuation must append results and optional new user input", code="invalid_tool_continuation")
+        if not tail or any(item.get("type", "message") not in ("function_call_output", "message") for item in tail):
+            raise InvalidRequest("Tool continuation must append results and optional context messages", code="invalid_tool_continuation")
         outputs = [item for item in tail if item.get("type") == "function_call_output"]
         results = {item["call_id"]: item["output"] for item in outputs}
         if len(results) != len(outputs) or set(results) != session.published_ids:
@@ -292,9 +290,9 @@ class NativeSDKBackend(SDKBackend):
         if history_changed or policy_changed or len(outputs) != len(tail):
             # Python's pending callback result has no separate user-message
             # channel. Retire this paused run before a cold reconstruction so
-            # extra user text is preserved and completed tools are replayed.
+            # extra context is preserved and completed tools are replayed.
             reason = ("tool_continuation_history_changed" if history_changed else
-                      "tool_continuation_policy_changed" if policy_changed else "tool_results_with_new_user_input")
+                      "tool_continuation_policy_changed" if policy_changed else "tool_results_with_new_context")
             return await self._rebuild_continuation(session, body, history, on_event, reason)
         session.history, session.body = copy.deepcopy(history), body
         session.on_event, session.stats = on_event, REQUEST_STATS.get()

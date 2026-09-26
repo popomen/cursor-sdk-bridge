@@ -1,0 +1,61 @@
+{
+  "check": "codex_new_task_explicit_cursor_provider",
+  "running_version": "491df54d732506d842259548eac112842630d7d8",
+  "model": "claude-opus-5-5-high",
+  "provider": "cursor",
+  "default_provider_switch_tested": false,
+  "passed": true,
+  "automatic_retry": false,
+  "previous_attempt": {
+    "outcome": "invalid_request:unsupported_request",
+    "sdk_generations": 0,
+    "configuration_overrides_complete": false
+  },
+  "exit_code": 0,
+  "stderr_bytes": 0,
+  "turns_completed": 1,
+  "tool_items": 0,
+  "usage": {
+    "input_tokens": 24875,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 39,
+    "reasoning_output_tokens": 0
+  },
+  "config_bytes_unchanged": true,
+  "records": [
+    {
+      "ts": "2026-09-26T23:17:46.759+08:00",
+      "event": "inference",
+      "model": "claude-opus-5-5-high",
+      "engine": "native",
+      "reuse_mode": "cold",
+      "reuse_reason": "no_direct_successor",
+      "usage": {
+        "input_tokens": 24875,
+        "output_tokens": 39,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 24871
+      },
+      "outcome": "completed",
+      "duration_s": 104.303
+    },
+    {
+      "ts": "2026-09-26T23:17:46.763+08:00",
+      "event": "http",
+      "model": "claude-opus-5-5-high",
+      "engine": "native",
+      "reuse_mode": "cold",
+      "reuse_reason": "no_direct_successor",
+      "usage": {
+        "input_tokens": 24875,
+        "output_tokens": 39,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 24871
+      },
+      "outcome": "completed",
+      "duration_s": 104.548
+    }
+  ],
+  "duration_s": 113.668
+}
