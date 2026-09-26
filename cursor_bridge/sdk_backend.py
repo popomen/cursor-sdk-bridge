@@ -88,6 +88,31 @@ class SDKBackend:
             while await stream.read(65536):
                 pass
 
+    async def _probe_auth_failure(self, error):
+        """Classify a denied request using a free, read-only key check first.
+
+        Never retry the inference. A valid key may still lack a model/region
+        permission, so do not label every 403 as an invalid credential.
+        """
+        status = getattr(error, "status_code", None)
+        code = getattr(error, "code", None)
+        if status not in (401, 403) and code not in ("unauthenticated", "permission_denied"):
+            return
+        if self.client is None:
+            return
+        stats = REQUEST_STATS.get()
+        verdict = "unknown"
+        try:
+            await asyncio.wait_for(self.client.me(api_key=self.key), 10)
+            verdict = "valid"
+        except Exception as probe_error:
+            if getattr(probe_error, "status_code", None) == 401 or getattr(probe_error, "code", None) == "unauthenticated":
+                verdict = "invalid"
+        if stats is not None:
+            stats["credential_probe"] = verdict
+        if verdict == "invalid":
+            raise KeyInvalid() from None
+
     async def generate(self, model, prompt, images=()):
         # Queue wait and inference have separate bounds: waiting behind another
         # request must not consume this request's inference deadline. Never
@@ -116,7 +141,10 @@ class SDKBackend:
                 async with scope:
                     return await self._generate(model, prompt, images)
             except BaseException as exc:
-                await self.close()
+                try:
+                    await self._probe_auth_failure(exc)
+                finally:
+                    await self.close()
                 if isinstance(exc, TimeoutError) and scope.expired():
                     raise DeadlineExpired() from None
                 raise
