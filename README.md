@@ -1,6 +1,8 @@
-# cursor-bridge
+# cursor-sdk-bridge
 
-Cursor Bridge exposes OpenAI Responses and Anthropic Messages through Cursor SDK. It includes Codex and Claude Code provider switching, a metadata dashboard, probes, and versioned deployment. Runtime state and credentials remain in their existing locations.
+Cursor SDK Bridge exposes OpenAI Responses and Anthropic Messages through Cursor SDK. It includes Codex and Claude Code provider switching, a metadata dashboard, probes, and versioned deployment. Runtime state and credentials remain in their existing locations.
+
+The command is `cursor-bridge` and the Python package is `cursor_bridge`. Existing deployment paths and user unit names also retain `cursor-bridge`.
 
 ```sh
 cursor-bridge status

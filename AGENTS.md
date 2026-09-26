@@ -1,4 +1,4 @@
-# Cursor Bridge
+# Cursor SDK Bridge
 
 Work on main in this checkout. Do not touch production services unless the task authorizes it; confirm progress, queued requests, and open connections are idle immediately before any restart. Never stop the Codex daemon from its own active task.
 

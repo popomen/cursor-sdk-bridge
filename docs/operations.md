@@ -1,4 +1,4 @@
-# Operating Cursor Bridge
+# Operating Cursor SDK Bridge
 
 `cursor-bridge status` reads client configuration, daemon identity, service progress, request metadata and release versions. It does not make an inference request. The three instances are:
 
