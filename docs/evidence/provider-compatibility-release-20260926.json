@@ -1,0 +1,78 @@
+{
+  "source_commit": "1662b28f2c7724f44c0c31fb897188c4d81e3636",
+  "checked_at": "2026-09-26T14:28:05.199389+00:00",
+  "tests": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 ~/.codex/cursor-sdk2api/venv/bin/python -m unittest discover -s tests -p 'test_*.py'",
+    "count": 335,
+    "passed": true,
+    "duration_s": 45.474
+  },
+  "resume_evidence": "provider-resume-20260926.json",
+  "installed_module_matches_tested_source": true,
+  "credential_and_claude_files_unchanged": true,
+  "config_file_observation": {
+    "content_changed_since_before_snapshot": true,
+    "writer": "A config/batchWrite RPC was observed in the existing app-server log immediately before the file replacement; caller and changed fields are unknown.",
+    "selected_provider": "openai",
+    "selected_model": "gpt-6-astra",
+    "runtime_matches_config": true,
+    "current_file_preserved": true,
+    "correlated_rpc": {
+      "method": "config/batchWrite",
+      "log_id": 5403139,
+      "timestamp_seconds": 1790432678,
+      "timestamp_nanos": 60680132,
+      "delta_to_config_mtime_ms": 3.148
+    },
+    "bridge_deploy_and_restart_paths_write_client_config": false
+  },
+  "codex_daemon_unchanged": true,
+  "codex_daemon_pid": 642979,
+  "current_thread": {
+    "provider": "openai",
+    "model": "gpt-6-astra"
+  },
+  "instances": [
+    {
+      "name": "codex",
+      "state": "idle",
+      "running_version": "1662b28f2c7724f44c0c31fb897188c4d81e3636",
+      "deployed_version": "1662b28f2c7724f44c0c31fb897188c4d81e3636",
+      "needs_restart": false
+    },
+    {
+      "name": "claude",
+      "state": "idle",
+      "running_version": "1662b28f2c7724f44c0c31fb897188c4d81e3636",
+      "deployed_version": "1662b28f2c7724f44c0c31fb897188c4d81e3636",
+      "needs_restart": false
+    }
+  ],
+  "units": {
+    "codex": {
+      "MainPID": "1057356",
+      "ActiveState": "active",
+      "UnitFileState": "enabled",
+      "Transient": "no"
+    },
+    "claude": {
+      "MainPID": "1057312",
+      "ActiveState": "active",
+      "UnitFileState": "enabled",
+      "Transient": "no"
+    },
+    "dashboard": {
+      "MainPID": "1057372",
+      "ActiveState": "active",
+      "UnitFileState": "enabled",
+      "Transient": "no"
+    }
+  },
+  "real_inference_calls_for_this_fix": 0,
+  "remaining_acceptance": [
+    "User-operated Codex default-provider switch and a real new task",
+    "Desktop UI reconnect and original-thread continuation",
+    "Delete retained fallback rollback resources after Codex acceptance",
+    "Publish standalone repository to an accessible remote"
+  ]
+}

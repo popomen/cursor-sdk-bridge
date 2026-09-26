@@ -1,0 +1,210 @@
+{
+  "check": "provider_resume_compatibility",
+  "timestamp": "2026-09-26T14:23:19.143959+00:00",
+  "cli_version": "0.155.1",
+  "real_inference_calls": 0,
+  "real_user_files_accessed": false,
+  "private_stdio_appserver_only": true,
+  "synthetic_metadata_only": true,
+  "negative_source_commit": "47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+  "passed": true,
+  "candidate_source_sha256": "bffdf98a862f886706bc781285020561f5e51a39e72f8a17b69d4081e79c900e",
+  "cases": [
+    {
+      "case": "cursor_default_catalog",
+      "default_provider": "cursor",
+      "cursor_definition_present": true,
+      "custom_catalog_present": true,
+      "threads": {
+        "openai": {
+          "expected_provider": "openai",
+          "expected_model": "gpt-6-astra",
+          "expected_effort": "ultra",
+          "model_in_default_catalog": false,
+          "resume_overrides": [],
+          "success": true,
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "effort": "ultra",
+          "preserved": true,
+          "persisted": {
+            "sqlite_provider": "openai",
+            "session_meta_provider": "openai",
+            "settings_event_count": 3,
+            "settings_provider": "openai",
+            "settings_model": "gpt-6-astra",
+            "settings_effort": "ultra",
+            "consistent": true
+          }
+        },
+        "cursor": {
+          "expected_provider": "cursor",
+          "expected_model": "claude-opus-5-5-high",
+          "expected_effort": "high",
+          "model_in_default_catalog": true,
+          "resume_overrides": [],
+          "success": true,
+          "provider": "cursor",
+          "model": "claude-opus-5-5-high",
+          "effort": "high",
+          "preserved": true,
+          "persisted": {
+            "sqlite_provider": "cursor",
+            "session_meta_provider": "cursor",
+            "settings_event_count": 3,
+            "settings_provider": "cursor",
+            "settings_model": "claude-opus-5-5-high",
+            "settings_effort": "high",
+            "consistent": true
+          }
+        }
+      },
+      "catalog_model_count": 3,
+      "notifications": {
+        "remoteControl/status/changed": 1,
+        "thread/status/changed": 2,
+        "thread/goal/cleared": 2
+      },
+      "warning_diagnostics": [],
+      "stderr_bytes": 205
+    },
+    {
+      "case": "old_restore_missing_cursor_definition",
+      "default_provider": "openai",
+      "cursor_definition_present": false,
+      "custom_catalog_present": false,
+      "threads": {
+        "openai": {
+          "expected_provider": "openai",
+          "expected_model": "gpt-6-astra",
+          "expected_effort": "ultra",
+          "model_in_default_catalog": true,
+          "resume_overrides": [],
+          "success": true,
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "effort": "ultra",
+          "preserved": true,
+          "persisted": {
+            "sqlite_provider": "openai",
+            "session_meta_provider": "openai",
+            "settings_event_count": 4,
+            "settings_provider": "openai",
+            "settings_model": "gpt-6-astra",
+            "settings_effort": "ultra",
+            "consistent": true
+          }
+        },
+        "cursor": {
+          "expected_provider": "cursor",
+          "expected_model": "claude-opus-5-5-high",
+          "expected_effort": "high",
+          "model_in_default_catalog": false,
+          "resume_overrides": [],
+          "success": false,
+          "error_code": -32600,
+          "error_categories": {
+            "not_found": true,
+            "model_mentioned": true,
+            "provider_mentioned": true,
+            "fallback_mentioned": false,
+            "unsupported_mentioned": false
+          },
+          "persisted": {
+            "sqlite_provider": "cursor",
+            "session_meta_provider": "cursor",
+            "settings_event_count": 3,
+            "settings_provider": "cursor",
+            "settings_model": "claude-opus-5-5-high",
+            "settings_effort": "high",
+            "consistent": true
+          }
+        }
+      },
+      "catalog_model_count": 9,
+      "notifications": {
+        "remoteControl/status/changed": 1,
+        "thread/status/changed": 1,
+        "thread/goal/cleared": 1
+      },
+      "warning_diagnostics": [],
+      "stderr_bytes": 205
+    },
+    {
+      "case": "fixed_restore_retains_cursor_definition",
+      "default_provider": "openai",
+      "cursor_definition_present": true,
+      "custom_catalog_present": false,
+      "threads": {
+        "openai": {
+          "expected_provider": "openai",
+          "expected_model": "gpt-6-astra",
+          "expected_effort": "ultra",
+          "model_in_default_catalog": true,
+          "resume_overrides": [],
+          "success": true,
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "effort": "ultra",
+          "preserved": true,
+          "persisted": {
+            "sqlite_provider": "openai",
+            "session_meta_provider": "openai",
+            "settings_event_count": 5,
+            "settings_provider": "openai",
+            "settings_model": "gpt-6-astra",
+            "settings_effort": "ultra",
+            "consistent": true
+          }
+        },
+        "cursor": {
+          "expected_provider": "cursor",
+          "expected_model": "claude-opus-5-5-high",
+          "expected_effort": "high",
+          "model_in_default_catalog": false,
+          "resume_overrides": [],
+          "success": true,
+          "provider": "cursor",
+          "model": "claude-opus-5-5-high",
+          "effort": "high",
+          "preserved": true,
+          "persisted": {
+            "sqlite_provider": "cursor",
+            "session_meta_provider": "cursor",
+            "settings_event_count": 4,
+            "settings_provider": "cursor",
+            "settings_model": "claude-opus-5-5-high",
+            "settings_effort": "high",
+            "consistent": true
+          }
+        }
+      },
+      "catalog_model_count": 9,
+      "notifications": {
+        "remoteControl/status/changed": 1,
+        "thread/status/changed": 2,
+        "thread/goal/cleared": 2
+      },
+      "warning_diagnostics": [],
+      "stderr_bytes": 205
+    }
+  ],
+  "rpc_counts": {
+    "initialize": 7,
+    "thread/start": 2,
+    "thread/resume": 8,
+    "thread/settings/update": 2,
+    "model/list": 3
+  },
+  "network_sink_requests": {
+    "CONNECT": 17
+  },
+  "turn_start_calls": 0,
+  "limits": [
+    "No turn/start or inference: proves real app-server resume/config parsing, not subsequent generation or Desktop UI.",
+    "model/list describes the default catalog; a missing historic model there does not by itself prevent resume.",
+    "No inference was used to establish historic model capability metadata after restore."
+  ],
+  "source_commit": "1662b28f2c7724f44c0c31fb897188c4d81e3636",
+  "candidate_matches_commit": true
+}
