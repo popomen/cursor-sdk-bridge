@@ -114,5 +114,19 @@
   "root_cause": "The pending-tool validator rejected valid system context appended by Claude Code after a tool result. Earlier history rewrites also required validated reconstruction.",
   "fix": "Keep strict pending-call/result validation, cancel and clean up the paused run, reconstruct with all valid context messages and replay completed tool results.",
   "targeted_system_context_acceptance": "messages-system-context-20260926.json",
-  "observational_limit": "The restored original session completed multiple tool continuations with no new API error. A fresh system-tail reconstruction was proven by the separate synthetic live probe, not inferred from these ordinary continuations."
+  "observational_limit": "Recovery was verified on the original session through ordinary tool continuations and a later system-context reconstruction. The user task remains running; completion of its separate work is outside this bridge repair.",
+  "later_system_context_verification": {
+    "ts": "2026-09-26T23:38:23.240+08:00",
+    "api": "messages",
+    "model": "claude-opus-5-5-xhigh",
+    "input_items": 228,
+    "reuse_mode": "cold",
+    "reuse_reason": "tool_results_with_new_context",
+    "outcome": "completed",
+    "duration_s": 150.32,
+    "same_session": true,
+    "assistant_tool_use_at": "2026-09-26T15:38:23.248Z",
+    "client_tool_result_at": "2026-09-26T15:38:23.439Z",
+    "new_api_errors": 0
+  }
 }
