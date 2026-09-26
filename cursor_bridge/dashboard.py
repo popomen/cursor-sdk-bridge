@@ -43,8 +43,8 @@ INSTANCES = (
      'limits': {'max': claude_switch.MAX_DEADLINE_S, 'queue_timeout': claude_switch.QUEUE_TIMEOUT_S}},
 )
 LOG_FILES = ('requests.jsonl.3', 'requests.jsonl.2', 'requests.jsonl.1', 'requests.jsonl')
-LOG_FIELDS = ('ts', 'api', 'model', 'stream', 'input_items', 'prompt_bytes', 'images', 'queue_s', 'outcome',
-              'duration_s', 'usage')
+LOG_FIELDS = ('ts', 'event', 'dedup', 'api', 'model', 'stream', 'input_items', 'prompt_bytes', 'images', 'queue_s',
+              'outcome', 'duration_s', 'usage')
 UNIT_FIELDS = ('ActiveState', 'SubState', 'MainPID', 'NRestarts', 'ActiveEnterTimestamp')
 LOCAL_HOSTS = ('127.0.0.1', 'localhost', '[::1]')
 STALL_S, RECENT, REFRESH_S, WINDOW_HOURS = 120, 40, 10, 24
@@ -259,16 +259,33 @@ class LogReader:
 
 
 def summarize(entries, now, hours=WINDOW_HOURS):
+    '''Count each inference job once; legacy logs retain their request-based totals.
+
+    HTTP rows describe subscribers/retries and can repeat the inference's usage.
+    They have separate access counters and never contribute to model/token totals.
+    '''
     since = now - timedelta(hours=hours)
     outcomes, models, tokens, rejected, reported = Counter(), {}, {'input': 0, 'output': 0}, 0, False
+    http_outcomes, dedup, inference_records, legacy_records = Counter(), Counter(), 0, 0
     for entry in entries:
         moment = when(entry)
         if moment is None or moment < since:
             continue
         outcome = str(entry.get('outcome', ''))
+        event = entry.get('event')
+        if event == 'http':
+            http_outcomes[outcome] += 1
+            if entry.get('dedup') in ('hit', 'joined'):
+                dedup[entry['dedup']] += 1
         if outcome.startswith('invalid_request'):
             rejected += 1
             continue
+        if event not in (None, 'inference'):
+            continue
+        if event == 'inference':
+            inference_records += 1
+        else:
+            legacy_records += 1
         outcomes[outcome] += 1
         stats = models.setdefault(str(entry.get('model') or '?'), {'requests': 0, 'completed': 0, 'durations': []})
         stats['requests'] += 1
@@ -277,12 +294,16 @@ def summarize(entries, now, hours=WINDOW_HOURS):
             if isinstance(entry.get('duration_s'), (int, float)):
                 stats['durations'].append(entry['duration_s'])
         usage = entry.get('usage') if isinstance(entry.get('usage'), dict) else {}
-        for key, field in (('input', 'input_tokens'), ('output', 'output_tokens')):
-            if isinstance(usage.get(field), int):
-                tokens[key] += usage[field]
+        for key, field in (('input', 'input_tokens'), ('output', 'output_tokens'),
+                           ('cache_read', 'cache_read_tokens'), ('cache_write', 'cache_write_tokens')):
+            if type(usage.get(field)) is int and usage[field] >= 0:
+                tokens[key] = tokens.get(key, 0) + usage[field]
                 reported = True
     return {'hours': hours, 'requests': sum(outcomes.values()), 'completed': outcomes['completed'],
             'rejected': rejected, 'outcomes': dict(outcomes.most_common()), 'tokens': tokens if reported else None,
+            'counting_basis': 'inference_jobs_plus_legacy_requests',
+            'inference_records': inference_records, 'legacy_records': legacy_records,
+            'http': {'requests': sum(http_outcomes.values()), 'outcomes': dict(http_outcomes), 'dedup': dict(dedup)},
             'models': [{'model': model, 'requests': stats['requests'], 'completed': stats['completed'],
                         'p50_s': percentile(stats['durations'], 0.5), 'p90_s': percentile(stats['durations'], 0.9),
                         'max_s': max(stats['durations'], default=None)} for model, stats in sorted(models.items())]}
@@ -492,35 +513,50 @@ def clients_table(clients):
 
 def summary_block(item):
     summary = item['summary']
-    text = ' · '.join('%s %d' % (outcome_label(name), total) for name, total in summary['outcomes'].items()) or '没有请求'
+    text = '推理任务 %d' % summary['requests']
+    if summary['legacy_records']:
+        text += '（含旧版请求记录 %d）' % summary['legacy_records']
+    text += ' · HTTP 访问 %d' % summary['http']['requests']
+    outcomes = ' · '.join('%s %d' % (outcome_label(name), total) for name, total in summary['outcomes'].items())
+    if outcomes:
+        text += ' · ' + outcomes
     if summary['rejected']:
         text += '；预检拒绝 %d' % summary['rejected']
     if summary['tokens']:
         text += '；SDK token 输入 %s、输出 %s' % (count(summary['tokens']['input']), count(summary['tokens']['output']))
+        for field, label in (('cache_read', '缓存读取'), ('cache_write', '缓存写入')):
+            if field in summary['tokens']:
+                text += '、%s %s' % (label, count(summary['tokens'][field]))
     rows = ''.join('<tr><td>%s</td><td>%d</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td></tr>' % (
         esc(tier(model['model'])), model['requests'], model['completed'], esc(duration(model['p50_s'])),
         esc(duration(model['p90_s'])), esc(duration(model['max_s']))) for model in summary['models'])
-    table = ('<table class=grid><tr><th>档位</th><th>请求</th><th>完成</th><th>完成耗时 p50</th><th>p90</th>'
+    table = ('<table class=grid><tr><th>档位</th><th>推理任务</th><th>完成</th><th>完成耗时 p50</th><th>p90</th>'
              '<th>最长</th></tr>%s</table>' % rows) if rows else ''
     return '<h2>%s（%s）· 最近 %d 小时</h2><p>%s</p>%s' % (
         esc(item['client']), esc(item['name']), summary['hours'], esc(text), table)
 
 
 def recent_table(recent):
-    header = ''.join('<th>%s</th>' % name for name in ('时间', '实例', '接口', '档位', '结果', '耗时', '排队', 'prompt',
+    header = ''.join('<th>%s</th>' % name for name in ('时间', '实例', '记录', '接口', '档位', '结果', '耗时', '排队', 'prompt',
                                                         '输入 token', '输出 token'))
     rows = []
     for entry in recent:
-        usage = entry.get('usage') if isinstance(entry.get('usage'), dict) else {}
+        event = entry.get('event')
+        usage = entry.get('usage') if event in (None, 'inference') and isinstance(entry.get('usage'), dict) else {}
+        label = {None: '旧版请求', 'inference': '推理', 'http': 'HTTP'}.get(event, '其他')
+        dedup = {'hit': '缓存命中', 'joined': '共享推理'}.get(entry.get('dedup'))
+        if dedup:
+            label += '（%s）' % dedup
         outcome, prompt = str(entry.get('outcome', '')), entry.get('prompt_bytes')
-        cells = (str(entry.get('ts', ''))[5:19].replace('T', ' '), entry['instance'], entry.get('api') or 'responses',
+        cells = (str(entry.get('ts', ''))[5:19].replace('T', ' '), entry['instance'], label, entry.get('api') or 'responses',
                  tier(entry.get('model')), outcome_label(outcome), duration(entry.get('duration_s')),
                  duration(entry.get('queue_s')), '%d KB' % (prompt // 1024) if isinstance(prompt, int) else None,
                  count(usage.get('input_tokens')), count(usage.get('output_tokens')))
         rows.append('<tr class=%s>%s</tr>' % ('ok' if outcome == 'completed' else 'bad',
                                               ''.join('<td>%s</td>' % esc(cell) for cell in cells)))
-    body = ''.join(rows) or '<tr><td colspan=10>暂无记录</td></tr>'
-    return '<h2>最近请求</h2><table class=grid><tr>%s</tr>%s</table>' % (header, body)
+    body = ''.join(rows) or '<tr><td colspan=11>暂无记录</td></tr>'
+    return ('<h2>最近事件</h2><p class=muted>HTTP 访问与重试不重复计入推理或 token 总量。</p>'
+            '<table class=grid><tr>%s</tr>%s</table>') % (header, body)
 
 
 def page(body, refresh=None):

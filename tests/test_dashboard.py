@@ -1,17 +1,23 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 import http.client
 import json
 import os
 from pathlib import Path
+import socket
+import struct
 import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 import urllib.parse
 
 from cursor_bridge import claude_switch
 from cursor_bridge import dashboard
 from cursor_bridge.cursor_sdk2api import Service, make_server
+from cursor_bridge.request_log import REQUEST_STATS, RequestLog
 from cursor_bridge.sdk_backend import DEFAULT_QUEUE_TIMEOUT, DEFAULT_TIMEOUTS, SDKBackend
 
 NL = chr(10)
@@ -106,6 +112,173 @@ class SummaryTests(unittest.TestCase):
                          (3, 2, 10.0, 30.0, 30.0))
         empty = dashboard.summarize([], NOW)
         self.assertEqual((empty['requests'], empty['completed'], empty['tokens']), (0, 0, None))
+
+    def test_http_retries_and_disconnects_are_separate_from_inference_and_cache_usage(self):
+        usage = {'input_tokens': 100, 'output_tokens': 10, 'cache_read_tokens': 80, 'cache_write_tokens': 20}
+        common = {'ts': ts(1), 'model': MAX, 'outcome': 'completed', 'duration_s': 4, 'usage': usage}
+        entries = [{**common, 'event': 'inference'}, {**common, 'event': 'http'},
+                   {**common, 'event': 'http', 'dedup': 'hit'}, {**common, 'event': 'http', 'dedup': 'joined'},
+                   {**common, 'event': 'http', 'outcome': 'client_disconnected'},
+                   {'ts': ts(1), 'event': 'http', 'outcome': 'invalid_request:malformed_request'},
+                   {**common, 'event': 'unknown_event'}]
+        summary = dashboard.summarize(entries, NOW)
+        self.assertEqual((summary['requests'], summary['completed'], summary['rejected']), (1, 1, 1))
+        self.assertEqual((summary['inference_records'], summary['legacy_records']), (1, 0))
+        self.assertEqual(summary['counting_basis'], 'inference_jobs_plus_legacy_requests')
+        self.assertEqual(summary['tokens'], {'input': 100, 'output': 10, 'cache_read': 80, 'cache_write': 20})
+        self.assertEqual(summary['outcomes'], {'completed': 1})
+        self.assertEqual(summary['http'], {'requests': 5, 'outcomes': {
+            'completed': 3, 'client_disconnected': 1, 'invalid_request:malformed_request': 1},
+            'dedup': {'hit': 1, 'joined': 1}})
+        self.assertEqual(summary['models'][0]['requests'], 1)
+
+    def test_mixed_legacy_logs_keep_original_counts_without_new_http_usage(self):
+        common = {'ts': ts(1), 'model': MAX, 'outcome': 'completed', 'usage': {'input_tokens': 100, 'output_tokens': 10}}
+        summary = dashboard.summarize([common, {**common, 'event': 'inference'}, {**common, 'event': 'http'},
+                                      {'ts': ts(1), 'outcome': 'invalid_request:unsupported_request'}], NOW)
+        self.assertEqual((summary['requests'], summary['inference_records'], summary['legacy_records']), (2, 1, 1))
+        self.assertEqual(summary['tokens'], {'input': 200, 'output': 20})
+        self.assertEqual(summary['rejected'], 1)
+        self.assertEqual(summary['http']['requests'], 1)
+
+    def test_http_only_rows_do_not_invent_inference_or_usage(self):
+        summary = dashboard.summarize([{'ts': ts(1), 'event': 'http', 'model': MAX, 'outcome': 'completed',
+                                       'dedup': 'hit', 'usage': {'input_tokens': 900, 'output_tokens': 9}}], NOW)
+        self.assertEqual(summary['requests'], 0)
+        self.assertIsNone(summary['tokens'])
+        self.assertEqual(summary['models'], [])
+        self.assertEqual(summary['http']['requests'], 1)
+
+    def test_recent_rows_label_dedup_and_only_show_counted_usage(self):
+        common = {'ts': ts(1), 'instance': 'codex', 'model': MAX, 'outcome': 'completed',
+                  'usage': {'input_tokens': 123, 'output_tokens': 456}}
+        page = dashboard.recent_table([{**common, 'event': 'inference'},
+                                       {**common, 'event': 'http', 'dedup': 'hit'},
+                                       {**common, 'event': 'http', 'dedup': 'joined'}])
+        self.assertIn('HTTP（缓存命中）', page)
+        self.assertIn('HTTP（共享推理）', page)
+        self.assertEqual(page.count('<td>123</td>'), 1)
+        self.assertEqual(page.count('<td>456</td>'), 1)
+
+
+class LedgerMeasurementTests(unittest.TestCase):
+    '''Exercise actual HTTP logging, deduplication and a detached inference with no SDK network.'''
+    def setUp(self):
+        class FakeBackend:
+            def __init__(self):
+                self.started, self.release = threading.Event(), threading.Event()
+                self.calls, self.cancelled = 0, False
+
+            async def generate(self, model, prompt):
+                self.calls += 1
+                self.started.set()
+                try:
+                    while not self.release.is_set():
+                        await asyncio.sleep(.005)
+                    REQUEST_STATS.get()['usage'] = {'input_tokens': 100, 'output_tokens': 10,
+                                                   'cache_read_tokens': 80, 'cache_write_tokens': 20}
+                    return '{"output":[{"type":"message","text":"synthetic answer"}]}'
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+
+            async def close(self):
+                pass
+
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.logs, self.reader = root / 'logs', dashboard.LogReader()
+        self.backend = FakeBackend()
+        self.service = Service(self.backend, ledger_path=root / 'results.sqlite3', log=RequestLog(self.logs))
+        self.server = make_server(self.service, 0)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.body = {'model': MAX, 'input': 'synthetic request'}
+
+    def tearDown(self):
+        self.backend.release.set()
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+        self.service.close()
+        self.temp.cleanup()
+
+    def request(self):
+        connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=3)
+        connection.request('POST', '/v1/responses', json.dumps(self.body), {'Content-Type': 'application/json'})
+        response = connection.getresponse()
+        value = json.load(response)
+        self.assertEqual(response.status, 200)
+        connection.close()
+        return value
+
+    def wait_logs(self, predicate):
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            entries = self.reader.entries(self.logs)
+            if predicate(entries):
+                return entries
+            time.sleep(.005)
+        self.fail('expected synthetic HTTP/inference log boundary did not arrive')
+
+    def assert_single_inference(self, entries, http_requests):
+        summary = dashboard.summarize(entries, datetime.now().astimezone())
+        self.assertEqual(self.backend.calls, 1)
+        self.assertEqual((summary['requests'], summary['completed'], summary['inference_records'], summary['legacy_records']),
+                         (1, 1, 1, 0))
+        self.assertEqual(summary['tokens'], {'input': 100, 'output': 10, 'cache_read': 80, 'cache_write': 20})
+        self.assertEqual(summary['http']['requests'], http_requests)
+        return summary
+
+    def test_completed_http_retry_records_one_inference_and_one_token_charge(self):
+        self.backend.release.set()
+        first, replay = self.request(), self.request()
+        self.assertEqual(first, replay)
+        entries = self.wait_logs(lambda rows: len(rows) == 3)
+        summary = self.assert_single_inference(entries, 2)
+        self.assertEqual(summary['http']['dedup'], {'hit': 1})
+
+    def test_disconnect_continue_join_and_completed_retry_do_not_duplicate_usage(self):
+        wire = json.dumps({**self.body, 'stream': True}).encode()
+        with patch('cursor_bridge.cursor_sdk2api.KEEPALIVE_SECONDS', .01):
+            connection = socket.create_connection(('127.0.0.1', self.server.server_port), timeout=3)
+            try:
+                connection.sendall(b'POST /v1/responses HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: '
+                                   + str(len(wire)).encode() + b'\r\n\r\n' + wire)
+                self.assertTrue(self.backend.started.wait(2))
+                connection.recv(4096)
+                connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+            finally:
+                connection.close()
+            entries = self.wait_logs(lambda rows: any(row.get('outcome') == 'client_disconnected' for row in rows))
+        pending = dashboard.summarize(entries, datetime.now().astimezone())
+        self.assertEqual((pending['requests'], pending['http']['requests']), (0, 1))
+        self.assertIsNone(pending['tokens'])
+        self.assertFalse(self.backend.cancelled)
+        joined = threading.Event()
+        original_submit = self.service.submit
+        with self.service.submit_lock:
+            original_future = next(iter(self.service.jobs.values()))[0]
+
+        def observe_join(*args, **kwargs):
+            future = original_submit(*args, **kwargs)
+            if getattr(future, 'live_output', None) is original_future.live_output and not future.done():
+                joined.set()
+            return future
+
+        with patch.object(self.service, 'submit', side_effect=observe_join), ThreadPoolExecutor(max_workers=1) as executor:
+            retry = executor.submit(self.request)
+            try:
+                observed = joined.wait(2)
+            finally:
+                self.backend.release.set()
+            self.assertTrue(observed)
+            retry.result(3)
+        self.request()
+        entries = self.wait_logs(lambda rows: len(rows) == 4)
+        summary = self.assert_single_inference(entries, 3)
+        self.assertEqual(summary['http']['outcomes']['client_disconnected'], 1)
+        self.assertEqual(summary['http']['dedup'], {'joined': 1, 'hit': 1})
 
 
 class LogReaderTests(unittest.TestCase):
@@ -338,6 +511,22 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(snapshot['clients'][0]['provider'], 'cursor')
         self.assertEqual(snapshot['clients'][1]['error'], 'ValueError')
         self.assertNotIn(self.board.token, body)
+
+    def test_status_recent_preserves_event_and_dedup_metadata(self):
+        path = Path(self.board.instances[1]['state_dir']) / 'logs' / 'requests.jsonl'
+        entry = {'ts': ts(0), 'event': 'http', 'dedup': 'hit', 'api': 'messages', 'model': MAX,
+                 'outcome': 'completed', 'usage': {'input_tokens': 999, 'output_tokens': 99},
+                 'private_extra': 'must not leave the log reader'}
+        with path.open('a') as handle:
+            handle.write(json.dumps(entry) + NL)
+        snapshot = json.loads(self.get('/api/status')[2])
+        recent = next(row for row in snapshot['recent'] if row.get('event') == 'http')
+        self.assertEqual((recent['event'], recent['dedup']), ('http', 'hit'))
+        self.assertNotIn('private_extra', recent)
+        summary = snapshot['instances'][1]['summary']
+        self.assertEqual(summary['tokens'], {'input': 50000, 'output': 1200})
+        self.assertEqual(summary['http']['requests'], 1)
+        self.assertIn('HTTP（缓存命中）', self.get('/')[2])
 
     def test_foreign_host_and_unknown_path_are_refused(self):
         self.assertEqual(self.get('/', 'evil.example:8791')[0], 403)
