@@ -331,9 +331,9 @@ def describe(spec, health, error):
         deadlines = limits.get('deadlines') if isinstance(limits.get('deadlines'), dict) else {}
         expected = spec['limits']
         if deadlines.get('max') != expected['max'] or limits.get('queue_timeout') != expected['queue_timeout']:
-            notes.append('max 推理时限 %s、排队上限 %s，预期分别为 %s、%s；按 SKILL.md 重建 %s。' % (
+            notes.append('max 推理时限 %s、排队上限 %s，预期分别为 %s、%s；实例空闲后用 cursor-bridge restart %s 重启。' % (
                 seconds(deadlines.get('max')), seconds(limits.get('queue_timeout')), seconds(expected['max']),
-                seconds(expected['queue_timeout']), spec['unit']))
+                seconds(expected['queue_timeout']), spec['name']))
     if progress is None:
         state = 'legacy'
     elif active is None:

@@ -25,7 +25,7 @@ MAIN, FAST = MODELS[2], MODELS[0]
 DEFAULT_PORT = 8790
 LOCAL_TOKEN = "cursor-sdk2api-local"
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
-# Must match scripts/serve_claude.sh; the service bounds a request by queue + inference + 30 s.
+# Must match the CLI's Claude serve defaults; bounds are queue + inference + 30 s.
 MAX_DEADLINE_S, QUEUE_TIMEOUT_S = 1800, 1800
 REQUEST_BOUND_S = QUEUE_TIMEOUT_S + MAX_DEADLINE_S + 30
 API_TIMEOUT_MS = str((REQUEST_BOUND_S + 270) * 1000)
@@ -213,8 +213,8 @@ def service_report(port):
         report["limits"] = limits
     deadlines = limits.get("deadlines") if isinstance(limits.get("deadlines"), dict) else {}
     if deadlines.get("max") != MAX_DEADLINE_S or limits.get("queue_timeout") != QUEUE_TIMEOUT_S:
-        report["next_step"] = ("Restart cursor-sdk2api-claude.service through scripts/serve_claude.sh so the max "
-                               f"inference and queue limits are {MAX_DEADLINE_S} s; see the Claude Code section of SKILL.md.")
+        report["next_step"] = ("When idle, run cursor-bridge restart claude so the max "
+                               f"inference and queue limits are {MAX_DEADLINE_S} s; see docs/operations.md.")
     return report
 
 
