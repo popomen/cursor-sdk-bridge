@@ -154,8 +154,20 @@ class HelperTests(unittest.TestCase):
             unit = {**UNIT, 'started_at': time.time() - 100}
             board = dashboard.Dashboard(health_reader=lambda port: (CURRENT, None), unit_reader=lambda name: unit,
                                         connection_counter=lambda port: 0, source_dir=temp)
-            stale = [board.inspect(spec)['stale_files'] for spec in dashboard.INSTANCES]
-        self.assertEqual(stale, [[], ['serve_claude.sh']])
+            board.version_reader = lambda: 'deployed'
+            stale = [board.inspect(spec)['needs_restart'] for spec in dashboard.INSTANCES]
+        self.assertEqual(stale, [True, True])
+
+    def test_restart_version_depends_on_deployment_not_checkout_mtime(self):
+        board = dashboard.Dashboard(health_reader=lambda port: ({**CURRENT, 'running_version': 'abc'}, None),
+                                    unit_reader=lambda unit: UNIT, connection_counter=lambda port: 0,
+                                    version_reader=lambda: 'abc')
+        item = board.inspect(SPEC)
+        self.assertFalse(item['needs_restart'])
+        board.version_reader = lambda: 'def'
+        item = board.inspect(SPEC)
+        self.assertTrue(item['needs_restart'])
+        self.assertEqual((item['running_version'], item['deployed_version']), ('abc', 'def'))
 
     def test_restart_blocker(self):
         idle = {'state': 'idle', 'active': None, 'queued': 0, 'connections': 0}
@@ -180,11 +192,12 @@ class RestartTests(unittest.TestCase):
         spec = {**dashboard.INSTANCES[1], 'port': 2}
         return dashboard.Dashboard((spec,), health_reader=lambda port: health, unit_reader=lambda unit: None,
                                    connection_counter=lambda port: connections, restart_runner=runner,
-                                   ready_wait_s=0.2)
+                                   ready_wait_s=0.2,
+                                   admin_client=lambda port, action: {'draining': action == 'drain', 'unfinished': 0})
 
     def test_restart_waits_for_health_and_reports_when_it_does_not_return(self):
         result = self.board((None, 'URLError')).restart('claude')
-        self.assertEqual((result['result'], self.calls), ('failed', ['cursor-sdk2api-claude.service']))
+        self.assertEqual((result['result'], self.calls), ('failed', ['cursor-bridge-claude.service']))
         self.assertIn('没有恢复', result['message'])
 
     def test_busy_instances_and_unknown_names_are_not_restarted(self):
@@ -199,6 +212,58 @@ class RestartTests(unittest.TestCase):
         result = board.restart('claude')
         self.assertEqual(result['result'], 'failed')
         self.assertIn('退出码 5', result['message'])
+
+
+    def test_pending_work_refuses_and_resumes_admission(self):
+        board = self.board((CURRENT, None))
+        actions = []
+        def admin(port, action):
+            actions.append(action)
+            return {'draining': action == 'drain', 'unfinished': 1}
+        board.admin_client = admin
+        self.assertEqual(board.restart('claude')['result'], 'refused')
+        self.assertEqual(actions, ['drain', 'resume'])
+        self.assertEqual(self.calls, [])
+
+    def test_connection_race_after_draining_refuses_and_resumes(self):
+        board = self.board((CURRENT, None))
+        counts = iter((0, 1))
+        board.connection_counter = lambda port: next(counts)
+        actions = []
+        def admin(port, action):
+            actions.append(action)
+            return {'draining': action == 'drain', 'unfinished': 0}
+        board.admin_client = admin
+        self.assertEqual(board.restart('claude')['result'], 'refused')
+        self.assertEqual(actions, ['drain', 'resume'])
+        self.assertEqual(self.calls, [])
+
+    def test_unavailable_drain_endpoint_never_restarts(self):
+        board = self.board((CURRENT, None))
+        actions = []
+        def admin(port, action):
+            actions.append(action)
+            raise RuntimeError('synthetic')
+        board.admin_client = admin
+        self.assertEqual(board.restart('claude')['result'], 'refused')
+        self.assertEqual(actions, ['drain', 'resume'])
+        self.assertEqual(self.calls, [])
+
+    def test_restart_requires_the_selected_release(self):
+        board = self.board((CURRENT, None))
+        board.version_reader = lambda: 'expected-commit'
+        self.assertEqual(board.restart('claude')['result'], 'failed')
+        self.assertEqual(self.calls, ['cursor-bridge-claude.service'])
+
+    def test_success_does_not_resume_old_process(self):
+        board = self.board((CURRENT, None))
+        actions = []
+        def admin(port, action):
+            actions.append(action)
+            return {'draining': True, 'unfinished': 0}
+        board.admin_client = admin
+        self.assertEqual(board.restart('claude')['result'], 'restarted')
+        self.assertEqual(actions, ['drain'])
 
 
 class HTTPTests(unittest.TestCase):
@@ -225,7 +290,8 @@ class HTTPTests(unittest.TestCase):
         self.board = dashboard.Dashboard(instances, codex_home=root / 'codex', claude_settings=root / 'missing.json',
                                          claude_state=root / 'state.json', health_reader=lambda port: healths[port],
                                          unit_reader=lambda unit: UNIT, connection_counter=lambda port: 0,
-                                         restart_runner=self.restarts.append, source_dir=root, ready_wait_s=0.2)
+                                         restart_runner=self.restarts.append, source_dir=root, ready_wait_s=0.2,
+                                         admin_client=lambda port, action: {'draining': action == 'drain', 'unfinished': 0})
         self.server = dashboard.make_server(self.board, 0)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -283,7 +349,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn('form-action', headers['Content-Security-Policy'])
         self.assertIn(self.board.token, page)
-        self.assertIn('确认重启 cursor-sdk2api.service', page)
+        self.assertIn('确认重启 cursor-bridge-codex.service', page)
         status, _, page = self.get('/restart?instance=claude')
         self.assertEqual(status, 200)
         self.assertNotIn(self.board.token, page)
@@ -303,10 +369,10 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.restarts, [])
         status, headers, _ = self.post(good, {'Origin': 'http://localhost:64517', 'Sec-Fetch-Site': 'same-origin'})
         self.assertEqual((status, headers['Location']), (303, '/'))
-        self.assertEqual(self.restarts, ['cursor-sdk2api.service'])
-        self.assertIn('已重启 cursor-sdk2api.service，/health 已恢复。', self.get('/')[2])
+        self.assertEqual(self.restarts, ['cursor-bridge-codex.service'])
+        self.assertIn('已重启 cursor-bridge-codex.service，/health 已恢复。', self.get('/')[2])
         self.assertEqual(self.post({**good, 'instance': 'claude'})[0], 303)
-        self.assertEqual(self.restarts, ['cursor-sdk2api.service'])
+        self.assertEqual(self.restarts, ['cursor-bridge-codex.service'])
         snapshot = json.loads(self.get('/api/status')[2])
         self.assertEqual((snapshot['last_action']['instance'], snapshot['last_action']['result']), ('claude', 'refused'))
 

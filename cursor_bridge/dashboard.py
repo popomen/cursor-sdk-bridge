@@ -23,7 +23,7 @@ import tomllib
 import urllib.parse
 import urllib.request
 
-from cursor_bridge import claude_switch
+from cursor_bridge import claude_switch, deployment, version
 
 HOME = Path.home()
 SCRIPTS = Path(__file__).resolve().parent
@@ -36,9 +36,9 @@ RUNTIME_FILES = ('cursor_sdk2api.py', 'sdk_backend.py', 'responses_protocol.py',
                  'request_log.py', 'spike_tools.py', 'sdk_http1.mjs', 'serve.sh')
 INSTANCES = (
     {'name': 'codex', 'client': 'Codex', 'port': 8789, 'state_dir': HOME / '.codex/cursor-sdk2api',
-     'unit': 'cursor-sdk2api.service', 'launchers': (), 'limits': {'max': 1200, 'queue_timeout': 1200}},
+     'unit': 'cursor-bridge-codex.service', 'launchers': (), 'limits': {'max': 1200, 'queue_timeout': 1200}},
     {'name': 'claude', 'client': 'Claude Code', 'port': claude_switch.DEFAULT_PORT,
-     'state_dir': HOME / '.codex/cursor-sdk2api-claude', 'unit': 'cursor-sdk2api-claude.service',
+     'state_dir': HOME / '.codex/cursor-sdk2api-claude', 'unit': 'cursor-bridge-claude.service',
      'launchers': ('serve_claude.sh',),
      'limits': {'max': claude_switch.MAX_DEADLINE_S, 'queue_timeout': claude_switch.QUEUE_TIMEOUT_S}},
 )
@@ -89,7 +89,7 @@ def fetch_health(port, timeout=2):
 
 def unit_info(unit):
     command = ['systemctl', '--user', 'show', unit, '--no-pager']
-    for field in UNIT_FIELDS + ('ActiveEnterTimestampMonotonic',):
+    for field in UNIT_FIELDS + ('ActiveEnterTimestampMonotonic', 'UnitFileState', 'FragmentPath'):
         command += ['-p', field]
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=3)
@@ -98,7 +98,7 @@ def unit_info(unit):
     if done.returncode != 0:
         return None
     values = dict(line.split('=', 1) for line in done.stdout.splitlines() if '=' in line)
-    info = {field: values.get(field) for field in UNIT_FIELDS}
+    info = {field: values.get(field) for field in UNIT_FIELDS + ('UnitFileState', 'FragmentPath')}
     try:
         started = int(values.get('ActiveEnterTimestampMonotonic') or 0) / 1e6
     except ValueError:
@@ -157,6 +157,8 @@ def restart_blocker(item):
         return '有推理正在进行'
     if item.get('queued'):
         return '%s 个请求在排队' % item['queued']
+    if item.get('unfinished'):
+        return '%s 个请求或工具仍未完成' % item['unfinished']
     connections = item.get('connections')
     if connections:
         return '端口上有 %d 个未结束的连接，可能有请求正在进行' % connections
@@ -297,7 +299,9 @@ def describe(spec, health, error):
     limits = health.get('limits') if isinstance(health.get('limits'), dict) else None
     active = progress.get('active') if progress and isinstance(progress.get('active'), dict) else None
     report.update(adapter_version=health.get('adapter_version'), limits=limits, active=active,
-                  queued=progress.get('queued') if progress else None)
+                  queued=progress.get('queued') if progress else None,
+                  unfinished=progress.get('unfinished', health.get('unfinished')) if progress else None,
+                  running_version=health.get('running_version'))
     missing = [name for name in REQUIRED_CAPABILITIES if name not in (health.get('capabilities') or [])]
     if missing or limits is None:
         notes.append('仍在运行旧版适配器代码（缺少 %s），没有进行中的请求时重启 %s 才会生效。'
@@ -328,7 +332,8 @@ def describe(spec, health, error):
 class Dashboard:
     def __init__(self, instances=INSTANCES, codex_home=None, claude_settings=None, claude_state=None,
                  health_reader=fetch_health, unit_reader=unit_info, connection_counter=established_connections,
-                 restart_runner=run_restart, source_dir=SCRIPTS, ready_wait_s=READY_WAIT_S):
+                 restart_runner=run_restart, source_dir=SCRIPTS, ready_wait_s=READY_WAIT_S,
+                 admin_client=deployment.admin_request, version_reader=version.deployed_version):
         codex = Path(codex_home or os.environ.get('CODEX_HOME') or HOME / '.codex')
         claude_dir = Path(os.environ.get('CLAUDE_CONFIG_DIR') or HOME / '.claude')
         self.instances, self.codex_home = instances, codex
@@ -337,6 +342,7 @@ class Dashboard:
         self.health_reader, self.unit_reader, self.logs = health_reader, unit_reader, LogReader()
         self.connection_counter, self.restart_runner = connection_counter, restart_runner
         self.source_dir, self.ready_wait_s = Path(source_dir), ready_wait_s
+        self.admin_client, self.version_reader = admin_client, version_reader
         # Proves a restart form came from this process's own page; other sites cannot read it.
         self.token = secrets.token_urlsafe(32)
         self.restart_lock, self.last_action = threading.Lock(), None
@@ -348,11 +354,12 @@ class Dashboard:
         health, error = self.health_reader(spec['port'])
         unit = self.unit_reader(spec['unit'])
         item = describe(spec, health, error)
+        deployed = self.version_reader()
+        running = item.get('running_version')
         item.update(unit=unit, connections=self.connection_counter(spec['port']),
-                    stale_files=stale_sources(unit.get('started_at') if unit else None, self.source_dir,
-                                              RUNTIME_FILES + tuple(spec.get('launchers', ()))))
-        if item['stale_files'] and item['state'] != 'offline':
-            item['notes'].append('服务启动后这些源码又有更新：%s，重启后才生效。' % '、'.join(item['stale_files']))
+                    deployed_version=deployed, needs_restart=bool(deployed and deployed != running))
+        if item['needs_restart'] and item['state'] != 'offline':
+            item['notes'].append('运行版本 %s 与已部署版本 %s 不同，实例空闲后重启。' % (running or '未知', deployed))
         item['restart_blocker'] = restart_blocker(item)
         return item
 
@@ -383,30 +390,57 @@ class Dashboard:
                     recent.append({'instance': spec['name'], **{key: entry[key] for key in LOG_FIELDS if key in entry}})
         recent.sort(key=when, reverse=True)
         return {'generated_at': now.isoformat(timespec='seconds'), 'refresh_s': REFRESH_S, 'instances': instances,
-                'clients': self.clients(), 'recent': recent[:RECENT], 'last_action': self.last_action}
+                'clients': self.clients(), 'recent': recent[:RECENT], 'last_action': self.last_action, 'running_version': version.running_version(),
+                'deployed_version': self.version_reader()}
 
     def restart(self, name):
-        '''Restart an idle instance and wait for /health; return the recorded action, or None for unknown names.'''
+        """Close admission atomically, then require zero work and connections before restarting."""
         spec = self.spec(name)
         if spec is None:
             return None
         if not self.restart_lock.acquire(blocking=False):
             return self.record(spec, 'refused', '另一个重启还没结束，稍后再试。')
+        drained, restarted = False, False
         try:
             blocker = self.inspect(spec)['restart_blocker']
             if blocker:
                 return self.record(spec, 'refused', '%s，没有重启 %s。等请求结束后再试。' % (blocker, spec['unit']))
+            try:
+                # Mark before sending: a lost response may still have closed admission.
+                drained = True
+                state = self.admin_client(spec['port'], 'drain')
+                if (state.get('draining') is not True or type(state.get('unfinished')) is not int
+                        or state['unfinished'] != 0):
+                    return self.record(spec, 'refused', '实例仍有未完成请求或无法确认已停止接收新请求。')
+                # admin_request has consumed and closed its HTTP connection before this check.
+                connections = self.connection_counter(spec['port'])
+                if connections is None or connections != 0:
+                    return self.record(spec, 'refused', '端口仍有未结束连接或连接状态未知，没有重启。')
+            except Exception as exc:
+                return self.record(spec, 'refused', '无法安全暂停接收新请求（%s），没有重启。' % type(exc).__name__)
             error = self.restart_runner(spec['unit'])
             if error:
                 return self.record(spec, 'failed', '重启 %s 失败（%s）。' % (spec['unit'], error))
             deadline = time.monotonic() + self.ready_wait_s
-            while self.health_reader(spec['port'])[0] is None:
+            expected_version = self.version_reader()
+            while True:
+                health = self.health_reader(spec['port'])[0]
+                if (health is not None and not health.get('draining', False)
+                        and (expected_version is None or health.get('running_version') == expected_version)):
+                    break
                 if time.monotonic() >= deadline:
-                    return self.record(spec, 'failed', '已重启 %s，但 %g 秒内 /health 没有恢复，用 systemctl --user '
+                    return self.record(spec, 'failed', '已重启 %s，但 %g 秒内预期版本的 /health 没有恢复，用 systemctl --user '
                                        'status %s 检查。' % (spec['unit'], self.ready_wait_s, spec['unit']))
                 time.sleep(0.2)
+            restarted = True
             return self.record(spec, 'restarted', '已重启 %s，/health 已恢复。' % spec['unit'])
         finally:
+            if drained and not restarted:
+                try:
+                    self.admin_client(spec['port'], 'resume')
+                except Exception:
+                    if self.last_action:
+                        self.last_action['message'] += ' 自动恢复接收请求失败；检查 /health 的 draining 状态。'
             self.restart_lock.release()
 
     def record(self, spec, result, message):
@@ -432,7 +466,9 @@ def card(item):
             tier(active.get('model')), duration(active.get('running_s')), duration(active.get('deadline_s')),
             active.get('events'), duration(active.get('idle_s')))
     rows = (('客户端', item['client']), ('地址', '127.0.0.1:%s' % item['port']),
-            ('适配器版本', item.get('adapter_version')), ('systemd', unit_text), ('时限', limit_text),
+            ('适配器版本', item.get('adapter_version')), ('运行提交', item.get('running_version')),
+            ('已部署提交', item.get('deployed_version')), ('需要重启', item.get('needs_restart')),
+            ('systemd', unit_text), ('时限', limit_text),
             ('当前推理', active_text), ('排队', item.get('queued')), ('未结束连接', item.get('connections')))
     table = ''.join('<tr><th>%s</th><td>%s</td></tr>' % (esc(name), esc(value)) for name, value in rows)
     notes = ''.join('<li>%s</li>' % esc(note) for note in item['notes'])
@@ -571,6 +607,10 @@ class Handler(BaseHTTPRequestHandler):
             if spec is None:
                 return 404, 'unknown instance', TEXT
             return 200, render_confirm(board.inspect(spec), board.token), HTML
+        if parts.path == '/health':
+            return 200, json.dumps({'service': 'cursor-bridge-dashboard', 'status': 'ready',
+                                    'running_version': version.running_version(),
+                                    'deployed_version': board.version_reader()}), 'application/json'
         if parts.path == '/api/status':
             return 200, json.dumps(board.snapshot(), ensure_ascii=False), 'application/json'
         if parts.path == '/':
