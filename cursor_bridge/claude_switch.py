@@ -187,7 +187,7 @@ def verify_service(port):
         health, listing = fetch(port, "/health"), fetch(port, "/v1/models")
     except Exception as exc:
         raise ServiceNotReady(f"No adapter answers on 127.0.0.1:{port} ({type(exc).__name__}); start "
-                              "cursor-sdk2api-claude.service first. Settings were not changed.") from None
+                              "cursor-bridge-claude.service first. Settings were not changed.") from None
     if (not isinstance(health, dict) or health.get("service") != "cursor-sdk2api"
             or "anthropic_messages" not in (health.get("capabilities") or [])):
         raise ServiceNotReady(f"127.0.0.1:{port} does not serve Anthropic Messages; restart it with the current "
