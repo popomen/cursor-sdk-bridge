@@ -37,6 +37,17 @@ the native tool bridge is feasible with Python SDK 1.0.32; the experiment
 does not yet establish long-history cache improvements or client SSE
 translation correctness.
 
+`tests/test_native_backend.py` exercises the production backend with FakeSdk:
+20 deterministic tests cover native deltas, direct-successor resume, branches,
+namespace routing, images, parallel and sequential callback batches, delayed
+callbacks arriving after an HTTP response closed, pending expiry and cleanup,
+read-only authentication diagnosis, and cold replay of repeated historical
+tools in FIFO order. A tool-result request containing additional user text
+retires the paused run and rebuilds from the complete transcript, replaying
+completed tools; its receipt reason is `tool_results_with_new_user_input`.
+Native backend integration and comparative real-client benchmarks still need
+separate receipts; the earlier live probe established callback feasibility.
+
 Implementation facts from installed SDK source:
 
 - Register `CustomTool(execute=..., input_schema=...)` through

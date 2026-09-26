@@ -105,11 +105,20 @@ class DetachedTests(unittest.TestCase):
     def test_concurrent_retry_joins_same_future_and_response_id(self):
         first, a = self.submit()
         second, b = self.submit()
-        self.assertIs(first, second)
+        self.assertIs(first.live_output, second.live_output)
         self.assertEqual(a["id"], b["id"])
         self.backend.release.set()
         self.assertEqual(first.result(3)["id"], a["id"])
         self.assertEqual(self.backend.calls, 1)
+
+    def test_joining_store_true_retains_history_after_store_false_owner(self):
+        first, _ = self.submit({**BODY, "store": False})
+        second, _ = self.submit({**BODY, "store": True})
+        self.assertIs(first.live_output, second.live_output)
+        self.backend.release.set()
+        response = second.result(3)
+        followup = {"model": MODEL, "previous_response_id": response["id"], "input": "next"}
+        self.assertEqual(len(self.service.prepare(followup)[1]), 3)
 
     def test_completed_retry_survives_process_service_restart(self):
         self.backend.release.set()
@@ -151,13 +160,13 @@ class DetachedTests(unittest.TestCase):
         future, _ = self.submit()
         status, value = self.request("/admin/drain", {})
         self.assertEqual(status, 409)
-        self.assertTrue(value["draining"])
-        with self.assertRaisesRegex(RuntimeError, "draining"):
-            self.submit({**BODY, "input": "other"})
+        self.assertFalse(value["draining"])
         self.backend.release.set()
         future.result(3)
         status, value = self.request("/admin/drain", {})
         self.assertEqual((status, value["unfinished"]), (200, 0))
+        with self.assertRaisesRegex(RuntimeError, "draining"):
+            self.submit({**BODY, "input": "other"})
         self.request("/admin/resume", {})
         self.assertFalse(self.service.lifecycle()["draining"])
 

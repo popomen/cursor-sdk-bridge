@@ -40,6 +40,10 @@ class InvalidModelOutput(AdapterFailure):
     label = "invalid_model_output"
 
 
+class NativeProtocolError(AdapterFailure):
+    label = "native_protocol_error"
+
+
 class PromptTooLarge(AdapterFailure):
     label = "prompt_too_large"
 

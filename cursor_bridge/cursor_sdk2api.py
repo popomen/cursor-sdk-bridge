@@ -14,7 +14,7 @@ import time
 
 from cursor_bridge.anthropic_protocol import (ERROR_TYPES, complete_message, error_body, estimate_tokens, failure_error,
                                 message_shell, prepare_messages, stream_events)
-from cursor_bridge.failures import InvalidModelOutput, PromptTooLarge, RequestTimeout, error_code, failure_label
+from cursor_bridge.failures import InvalidModelOutput, NativeProtocolError, PromptTooLarge, RequestTimeout, error_code, failure_label
 from cursor_bridge.request_log import REQUEST_STATS, RequestLog
 from cursor_bridge.ledger import ResultLedger, request_digest
 from cursor_bridge.live_output import LiveOutput, MessagesLive, ResponsesLive
@@ -100,9 +100,17 @@ class Service:
             discard = getattr(self.backend, "discard_response", None)
             if discard:
                 discard(getattr(text, "reuse_token", None))
+            if self.mode == "native":
+                raise NativeProtocolError() from None
             raise InvalidModelOutput() from None
         if live is not None and self.mode == "native":
-            response = live.finalize(response)
+            try:
+                response = live.finalize(response)
+            except Exception:
+                discard = getattr(self.backend, "discard_response", None)
+                if discard:
+                    discard(getattr(text, "reuse_token", None))
+                raise
         usage = stats.get("usage") if stats else None
         if usage:
             response["usage"] = {"input_tokens": usage["input_tokens"], "output_tokens": usage["output_tokens"],
@@ -156,10 +164,22 @@ class Service:
                 if existing:
                     future, prior_shell, prior_stats = existing
                     shell.update(prior_shell)
+                    subscriber = concurrent.futures.Future()
+                    subscriber.live_output = future.live_output
                     def joined(done):
                         stats.update(prior_stats, dedup="joined")
+                        if subscriber.cancelled():
+                            return
+                        if done.cancelled():
+                            subscriber.cancel()
+                        elif done.exception() is not None:
+                            subscriber.set_exception(done.exception())
+                        else:
+                            result = done.result()
+                            self._remember(body, history, result)
+                            subscriber.set_result(result)
                     future.add_done_callback(joined)
-                    return future
+                    return subscriber
                 saved = self.ledger.get(digest)
                 if saved:
                     response = saved["response"]
@@ -240,10 +260,13 @@ class Handler(BaseHTTPRequestHandler):
             backend = self.server.service.backend
             progress, limits = getattr(backend, "progress", None), getattr(backend, "limits", None)
             from cursor_bridge.version import running_version
+            extra_capabilities = ["native_tools", "live_deltas"] if self.server.service.mode == "native" else []
+            if self.server.service.ledger:
+                extra_capabilities += ["durable_dedup", "disconnect_continuation"]
             self._json(200, {"running_version": running_version(), "mode": self.server.service.mode,
                              **self.server.service.lifecycle(), "service": "cursor-sdk2api", "status": "ready", "adapter_version": 3,
                              "capabilities": ["namespace_functions", "image_inputs", "structured_text_outputs", "safe_error_paths",
-                                              "failure_labels", "data_keepalive", "sdk_progress", "anthropic_messages"],
+                                              "failure_labels", "data_keepalive", "sdk_progress", "anthropic_messages"] + extra_capabilities,
                              "progress": progress() if progress else None,
                              "limits": limits() if limits else None})
         else:
@@ -267,9 +290,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.rfile.read(length)
             service = self.server.service
             with service.submit_lock:
-                service.draining = path == "/admin/drain"
                 state = service.lifecycle()
-            return self._json(409 if state["draining"] and state["unfinished"] else 200, state)
+                busy = path == "/admin/drain" and state["unfinished"] > 0
+                # A refused drain must not block tool results needed by an
+                # existing run. Close admission only after proving zero work.
+                if not busy:
+                    service.draining = path == "/admin/drain"
+                state = service.lifecycle()
+            return self._json(409 if busy else 200, state)
         if path not in POST_PATHS:
             return fail(404, "unknown endpoint")
         # No browser-origin requests: local tools can use HTTP without CORS.
@@ -290,10 +318,10 @@ class Handler(BaseHTTPRequestHandler):
         except InvalidRequest as exc:
             # All messages/paths are adapter-owned constants, never request text
             # or jsonschema exception strings that could contain private values.
-            service.record(**api, outcome="invalid_request:" + str(exc.code))
+            service.record(**({"event": "http"} if service.ledger else {}), **api, outcome="invalid_request:" + str(exc.code))
             return fail(400, str(exc), exc.code, exc.param)
         except (ValueError, KeyError, TypeError, AttributeError, TimeoutError):
-            service.record(**api, outcome="invalid_request:malformed_request")
+            service.record(**({"event": "http"} if service.ledger else {}), **api, outcome="invalid_request:malformed_request")
             return fail(400, "malformed JSON or request shape", "malformed_request")
         if path == "/v1/messages/count_tokens":
             return self._json(200, {"input_tokens": estimate_tokens(len(prompt.encode()), images)})
@@ -302,7 +330,7 @@ class Handler(BaseHTTPRequestHandler):
                  "prompt_bytes": len(prompt.encode()), "images": len(images),
                  "image_bytes": sum(image["bytes"] for image in images)}
         if not service.admission.acquire(blocking=False):
-            service.record(**entry, outcome="queue_full", duration_s=0)
+            service.record(**({"event": "http"} if service.ledger else {}), **entry, outcome="queue_full", duration_s=0)
             return fail(429, "request queue is full")
         if anthropic:
             return self._messages(service, body, request, history, prompt, images, entry, began)
@@ -354,7 +382,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         finally:
             service.admission.release()
-            service.record(**entry, **stats, outcome=outcome, duration_s=round(time.monotonic() - began, 3),
+            service.record(**({"event": "http"} if service.ledger else {}), **entry, **stats, outcome=outcome, duration_s=round(time.monotonic() - began, 3),
                            bridge_launches=getattr(service.backend, "launches", None))
 
     def _wait_inference(self, future, live, keepalive):
@@ -395,6 +423,9 @@ class Handler(BaseHTTPRequestHandler):
             # Like the Anthropic API, oversized prompts fail with HTTP 400 before any stream starts.
             if entry["prompt_bytes"] > service.max_prompt_bytes:
                 raise PromptTooLarge()
+            shell = response_shell(body["model"])
+            future = service.submit(shell, request, history, prompt, stats, images)
+            message["id"] = "msg_" + shell["id"].removeprefix("resp_")
             if streaming:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -403,7 +434,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 started = True
                 emit("message_start", {"type": "message_start", "message": message})
-            future = service.submit(response_shell(body["model"]), request, history, prompt, stats, images)
             response, streamed_items = self._wait_inference(future, MessagesLive(emit) if streaming else None,
                 lambda: emit("ping", {"type": "ping"}))
             result = complete_message(message, response, stats.get("usage"))
@@ -427,7 +457,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         finally:
             service.admission.release()
-            service.record(**entry, **stats, outcome=outcome, duration_s=round(time.monotonic() - began, 3),
+            service.record(**({"event": "http"} if service.ledger else {}), **entry, **stats, outcome=outcome, duration_s=round(time.monotonic() - began, 3),
                            bridge_launches=getattr(service.backend, "launches", None))
 
 
@@ -443,7 +473,8 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8789)
-    parser.add_argument("--mode", choices=("legacy", "reuse", "native"), default="legacy")
+    parser.add_argument("--mode", choices=("legacy", "reuse", "native"), default="native")
+    parser.add_argument("--pending-timeout", type=float, default=600)
     parser.add_argument("--no-ledger", action="store_true", help="disable retry deduplication")
     parser.add_argument("--dedup-ttl", type=float, default=3600)
     parser.add_argument("--state-dir", type=Path, default=Path.home() / ".codex/cursor-sdk2api")
@@ -477,9 +508,13 @@ def main():
         from cursor_bridge.reuse_backend import ReuseSDKBackend
         backend_type = ReuseSDKBackend
     elif args.mode == "native":
-        parser.error("native mode is not yet available; use reuse or legacy")
+        from cursor_bridge.native_backend import NativeSDKBackend
+        backend_type = NativeSDKBackend
+    if not 0 < args.pending_timeout <= MAX_TIMEOUT or args.dedup_ttl <= 0:
+        parser.error("pending timeout must be positive and at most 1800; dedup TTL must be positive")
+    extra = {"pending_timeout": args.pending_timeout} if args.mode == "native" else {}
     backend = backend_type(args.key_file, args.state_dir / "workspace", route=args.route, timeouts=timeouts,
-                         queue_timeout=args.queue_timeout)
+                         queue_timeout=args.queue_timeout, **extra)
     service = Service(backend, log=RequestLog(args.log_dir or args.state_dir / "logs"),
                       max_prompt_bytes=args.max_prompt_bytes, mode=args.mode,
                       ledger_path=None if args.no_ledger else args.state_dir / "results.sqlite3",

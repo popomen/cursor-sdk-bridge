@@ -49,7 +49,7 @@ cursor-bridge restart codex
 cursor-bridge restart dashboard
 ```
 
-For an adapter, the command first reads current progress and sockets. It then sends loopback-only `POST /admin/drain` with `{}`. Draining closes request admission and atomically reports `{"draining":true,"unfinished":0}` only when no request remains. Pending tools and detached runs count as unfinished. A busy response may use HTTP 409 and retains the drain until the caller resumes it.
+For an adapter, the command first reads current progress and sockets. It then sends loopback-only `POST /admin/drain` with `{}`. Draining closes request admission and atomically reports `{"draining":true,"unfinished":0}` only when no request remains. Pending tools and detached runs count as unfinished. A busy response uses HTTP 409 and leaves admission open, so an existing run can still receive its tool results.
 
 Only a confirmed zero unfinished count and zero established connections after the admin response closes permit `systemctl --user restart`. Unknown progress, unavailable drain support, pending work or open connections cause refusal. Any failure attempts `POST /admin/resume`; if resume fails, inspect `draining` in `/health` before retrying. The dashboard button uses the same guard. Restarting the dashboard only affects the UI process.
 

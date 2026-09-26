@@ -107,6 +107,11 @@ class LiveHttpTests(unittest.TestCase):
         self.assertEqual(text, "Hello world.")
         self.assertEqual(events[-1]["type"], "message_stop")
         self.assertEqual(sum(event["type"] == "content_block_stop" for event in events), 2)
+        connection, response = self.connect("messages")
+        replay = [json.loads(line[6:]) for line in response.read().decode().splitlines() if line.startswith("data: ")]
+        connection.close()
+        self.assertEqual(replay[0]["message"]["id"], events[0]["message"]["id"])
+        self.assertEqual(self.backend.calls, 1)
 
     def test_partial_stream_failure_never_claims_completed(self):
         self.backend.fail = True
