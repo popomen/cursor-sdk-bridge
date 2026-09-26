@@ -1,0 +1,74 @@
+{
+  "timestamp_utc": "2026-09-26T11:42:41.449170+00:00",
+  "forceReload": true,
+  "cwd": "/data00/home/zhudelin123/source/zhudelin123-skills",
+  "skills": [
+    {
+      "name": "cc-bp-bg-ultra",
+      "enabled": true,
+      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/cc-bp-bg-ultra/SKILL.md",
+      "source_matches": true
+    },
+    {
+      "name": "cc-bp-bg-ultra-review",
+      "enabled": true,
+      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/cc-bp-bg-ultra-review/SKILL.md",
+      "source_matches": true
+    },
+    {
+      "name": "codex-appserver-switch",
+      "enabled": true,
+      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/codex-appserver-switch/SKILL.md",
+      "source_matches": true
+    },
+    {
+      "name": "codex-cursor-fallback",
+      "enabled": true,
+      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/codex-cursor-fallback/SKILL.md",
+      "source_matches": true
+    },
+    {
+      "name": "cursor-bridge-ops",
+      "enabled": true,
+      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/cursor-bridge-ops/SKILL.md",
+      "source_matches": true
+    },
+    {
+      "name": "devbox-seedreplay-handbook",
+      "enabled": true,
+      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/devbox-seedreplay-handbook/SKILL.md",
+      "source_matches": true
+    },
+    {
+      "name": "i-have-adhd",
+      "enabled": true,
+      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/i-have-adhd/SKILL.md",
+      "source_matches": true
+    },
+    {
+      "name": "super-relay-model-health",
+      "enabled": true,
+      "path": "/data00/home/zhudelin123/source/zhudelin123-skills/byted-devbox-skills/super-relay-model-health/SKILL.md",
+      "source_matches": true
+    }
+  ],
+  "error_count": 0,
+  "skills_repository_commit": "adabc6deb89cbd6e75b6a59b4f259e444a7954ed",
+  "publication": {
+    "local_head_matches_origin_main": true,
+    "remote_main_matches": true,
+    "worktree_clean": true
+  },
+  "validation": {
+    "structure_validated": 4,
+    "fallback_tests": 190,
+    "old_appserver_tests": 4,
+    "archived_bridge_tests": 34,
+    "old_health_tests": 122,
+    "go_test": "passed with installed go1.25.4",
+    "go_build": "passed to temporary output",
+    "repository_lint_errors": 0,
+    "repository_lint_existing_warnings": 1
+  },
+  "remaining_cleanup": "Fallback scripts/assets/references remain solely for this migration rollback until the user-operated Codex switch and new-task acceptance pass."
+}

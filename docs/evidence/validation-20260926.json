@@ -12,7 +12,7 @@
   "systemd_validation": "Generated unit text also passed the real systemd-analyze --user verify parser, including paths with spaces and percent specifiers.",
   "pending_acceptance": [
     "Codex default-provider new task after user-operated daemon switch",
-    "Skill source migration and publication",
-    "Both repository remotes published"
+    "Delete temporarily retained fallback rollback resources after Codex acceptance",
+    "Publish cursor-bridge to an accessible remote repository"
   ]
 }
