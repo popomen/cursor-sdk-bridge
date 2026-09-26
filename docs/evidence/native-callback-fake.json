@@ -1,0 +1,16 @@
+{
+  "timestamp_utc": "2026-09-26T10:44:43.775667+00:00",
+  "sdk_version": "1.0.32",
+  "live": false,
+  "scope": "real SDK callback server with FakeSdk run",
+  "upstream_inference_calls": 0,
+  "first_http_response_completed": true,
+  "pending_survived_first_http_response": true,
+  "parallel_pending_count": 2,
+  "second_http_response_completed_same_run": true,
+  "result_content_shape_preserved": true,
+  "success": true,
+  "callback_execution_count": 2,
+  "event_types": {},
+  "elapsed_s": 0.666
+}

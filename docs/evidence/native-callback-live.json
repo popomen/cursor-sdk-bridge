@@ -1,0 +1,56 @@
+{
+  "timestamp_utc": "2026-09-26T10:45:46.098128+00:00",
+  "sdk_version": "1.0.32",
+  "live": true,
+  "scope": "upstream SDK run",
+  "upstream_inference_calls": 1,
+  "first_http_response_completed": true,
+  "pending_survived_first_http_response": true,
+  "parallel_pending_count": 1,
+  "second_http_response_completed_same_run": true,
+  "status": "finished",
+  "complete_envelopes": true,
+  "synthetic_response_matches": true,
+  "model": {
+    "id": "claude-opus-5-5",
+    "params": [
+      {
+        "id": "context",
+        "value": "1m"
+      },
+      {
+        "id": "effort",
+        "value": "high"
+      },
+      {
+        "id": "fast",
+        "value": "false"
+      }
+    ]
+  },
+  "usage": {
+    "input_tokens": 10790,
+    "output_tokens": 403,
+    "cache_read_tokens": 5191,
+    "cache_write_tokens": 5593
+  },
+  "success": true,
+  "callback_execution_count": 1,
+  "event_types": {
+    "envelope:sdk_message": 36,
+    "thinking-delta": 28,
+    "envelope:interaction_update": 94,
+    "token-delta": 58,
+    "thinking-completed": 1,
+    "tool-requests-listed": 1,
+    "tool-call-started": 1,
+    "tool-call-completed": 1,
+    "text-delta": 2,
+    "step-completed": 1,
+    "turn-ended": 1,
+    "envelope:result": 1,
+    "envelope:done": 1
+  },
+  "credential_probe": "valid",
+  "elapsed_s": 38.025
+}
