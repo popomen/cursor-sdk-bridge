@@ -84,6 +84,106 @@ class SwitchTests(unittest.TestCase):
                 switcher.switch(self.root, mode)
         self.assertIn("transaction", json.loads(self.state.read_text()))
 
+    def install_old_catalog(self):
+        old_root = self.root / 'old-skill'
+        (old_root / 'assets').mkdir(parents=True)
+        (old_root / 'assets/models.json').write_bytes((switcher.ROOT / 'assets/models.json').read_bytes())
+        with patch.object(switcher, 'ROOT', old_root):
+            switcher.switch(self.root, 'cursor')
+        return old_root / 'assets/models.json'
+
+    def test_catalog_upgrade_status_is_readonly_and_gives_independent_terminal_command(self):
+        old = self.install_old_catalog()
+        before = self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()
+        status = switcher.status(self.root)
+        self.assertTrue(status['catalog_path_upgrade_required'])
+        self.assertFalse(status['managed_config_conflict'])
+        self.assertEqual(status['model_catalog_json'], str(old))
+        self.assertEqual(status['expected_model_catalog_json'], str(switcher.ROOT / 'assets/models.json'))
+        self.assertIn('cursor-bridge switch codex cursor --restart-daemon', status['next_step'])
+        self.assertIn('separate SSH terminal', status['next_step'])
+        self.assertEqual((self.config.read_bytes(), self.state.read_bytes(), self.auth_stamp()), before)
+
+    def test_catalog_upgrade_is_one_transaction_preserving_baseline_effort_and_auth(self):
+        self.install_old_catalog()
+        self.change_config('model', 'claude-opus-5-5-max')
+        self.change_config('model_reasoning_effort', 'max')
+        self.change_config('unrelated_setting', 'preserved')
+        old_config = self.config.read_bytes()
+        old_state = json.loads(self.state.read_text())
+        stamp = self.auth_stamp()
+        prepared = []
+        switcher.switch(self.root, 'cursor', prepared=lambda final, staging: prepared.append((final, staging)))
+        config = tomllib.loads(self.config.read_text())
+        state = json.loads(self.state.read_text())
+        self.assertEqual(config['model_catalog_json'], str(switcher.ROOT / 'assets/models.json'))
+        self.assertEqual((config['model'], config['model_reasoning_effort']), ('claude-opus-5-5-max', 'max'))
+        self.assertEqual(state['original_config'], old_state['original_config'])
+        unchanged = {key: value for key, value in state['installed'].items() if key != 'model_catalog_json'}
+        self.assertEqual(unchanged, {key: value for key, value in old_state['installed'].items() if key != 'model_catalog_json'})
+        self.assertEqual(state['installed']['model_catalog_json'], {'present': True, 'value': config['model_catalog_json']})
+        self.assertEqual(len(prepared), 1)
+        final, staging = prepared[0]
+        self.assertEqual((final['config'], final['state']), (self.config.read_bytes(), self.state.read_bytes()))
+        transaction = json.loads(staging)['transaction']
+        self.assertEqual(switcher.decode(transaction['config.toml']['before']), old_config)
+        self.assertEqual(switcher.decode(transaction['config.toml']['after']), self.config.read_bytes())
+        self.assertFalse(switcher.status(self.root)['catalog_path_upgrade_required'])
+        before = self.config.read_bytes(), self.state.read_bytes()
+        switcher.switch(self.root, 'cursor')
+        self.assertEqual((self.config.read_bytes(), self.state.read_bytes()), before)
+        switcher.switch(self.root, 'openai')
+        restored = tomllib.loads(self.config.read_text())
+        self.assertEqual(restored.pop('unrelated_setting'), 'preserved')
+        self.assertEqual(restored, tomllib.loads(ORIGINAL))
+        self.assertEqual(self.auth_stamp(), stamp)
+
+    def test_interrupted_catalog_upgrade_recovers_before_config_write(self):
+        self.install_old_catalog()
+        original_baseline = json.loads(self.state.read_text())['original_config']
+        self.fail_first_config_write('cursor')
+        self.assertTrue(switcher.status(self.root)['transaction_pending'])
+        switcher.switch(self.root, 'cursor')
+        self.assertFalse(switcher.status(self.root)['catalog_path_upgrade_required'])
+        self.assertFalse(switcher.status(self.root)['transaction_pending'])
+        self.assertEqual(json.loads(self.state.read_text())['original_config'], original_baseline)
+        self.assertEqual(self.auth.read_bytes(), AUTH)
+
+    def test_interrupted_catalog_upgrade_preserves_state_edited_during_recovery_prepare(self):
+        self.install_old_catalog()
+        self.fail_first_config_write('cursor')
+        before = self.config.read_bytes(), self.state.read_bytes()
+        def edit(final, staging):
+            self.state.write_bytes(self.state.read_bytes() + b'\n')
+        with self.assertRaisesRegex(ValueError, 'state conflicts with external changes'):
+            switcher.switch(self.root, 'cursor', prepared=edit)
+        self.assertEqual(self.config.read_bytes(), before[0])
+        self.assertEqual(self.state.read_bytes(), before[1] + b'\n')
+        self.assertEqual(self.auth.read_bytes(), AUTH)
+
+    def test_catalog_upgrade_external_managed_path_is_not_overwritten(self):
+        self.install_old_catalog()
+        self.change_config('model_catalog_json', '/external/catalog.json')
+        before = self.config.read_bytes(), self.state.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'changed externally'):
+            switcher.switch(self.root, 'cursor')
+        self.assertEqual((self.config.read_bytes(), self.state.read_bytes()), before)
+
+    def test_catalog_upgrade_preserves_config_or_state_edited_during_prepare(self):
+        self.install_old_catalog()
+        for target in (self.state, self.config):
+            with self.subTest(target=target.name):
+                before = self.config.read_bytes(), self.state.read_bytes()
+                def edit(final, staging):
+                    target.write_bytes(target.read_bytes() + b'\n')
+                with self.assertRaisesRegex(ValueError, 'changed during switch preparation'):
+                    switcher.switch(self.root, 'cursor', prepared=edit)
+                self.assertEqual(target.read_bytes(), before[1 if target == self.state else 0] + b'\n')
+                other = self.config if target == self.state else self.state
+                self.assertEqual(other.read_bytes(), before[0 if target == self.state else 1])
+                target.write_bytes(before[1 if target == self.state else 0])
+        self.assertEqual(self.auth.read_bytes(), AUTH)
+
     def test_roundtrip_preserves_auth_inode_bytes_permissions_and_unrelated_config(self):
         original_auth_stat = self.auth_stamp()
         switcher.switch(self.root, "cursor")

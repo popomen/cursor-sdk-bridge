@@ -112,6 +112,98 @@ class RuntimeSwitchIncidentTests(unittest.TestCase):
     def assert_auth_preserved(self):
         self.assertEqual((self.directory / 'auth.json').read_bytes(), self.auth)
 
+    def install_old_catalog(self):
+        old_root = self.directory / 'old-skill'
+        (old_root / 'assets').mkdir(parents=True)
+        (old_root / 'assets/models.json').write_bytes((sc.ROOT / 'assets/models.json').read_bytes())
+        with patch.object(sc, 'ROOT', old_root):
+            self.apply('cursor')
+        return old_root / 'assets/models.json'
+
+    def old_cursor_files(self):
+        return ((self.directory / 'config.toml').read_bytes(),
+                (self.directory / 'cursor-fallback-state/state.json').read_bytes())
+
+    def test_catalog_path_upgrade_needs_explicit_restart_even_when_runtime_matches(self):
+        self.install_old_catalog()
+        before = self.old_cursor_files()
+        config = tomllib.loads(before[0].decode())
+        self.assertTrue(self.runtime.matches(self.runtime.live, config))
+        stopped = len(self.runtime.stopped)
+        with self.assertRaisesRegex(ar.RuntimeBlocked, 'older installation'):
+            self.apply('cursor', restart=False)
+        self.assertEqual(len(self.runtime.stopped), stopped)
+        self.assertEqual(self.old_cursor_files(), before)
+        self.assertFalse(self.journal.exists())
+        self.assert_auth_preserved()
+
+    def test_catalog_path_upgrade_restarts_and_verifies_current_catalog(self):
+        self.install_old_catalog()
+        before_state = json.loads(self.old_cursor_files()[1])
+        stopped = len(self.runtime.stopped)
+        observed = self.apply('cursor')
+        self.assertEqual(len(self.runtime.stopped), stopped + 1)
+        self.assertEqual(observed['config']['model_catalog_json'], str(sc.ROOT / 'assets/models.json'))
+        self.assertEqual(json.loads(self.old_cursor_files()[1])['original_config'], before_state['original_config'])
+        self.assertTrue(self.runtime.matches(observed, tomllib.loads(self.old_cursor_files()[0].decode())))
+        self.assertFalse(sc.status(self.directory)['catalog_path_upgrade_required'])
+        self.assert_auth_preserved()
+
+    def test_failed_catalog_upgrade_rolls_back_exact_config_and_state_bytes(self):
+        old = self.install_old_catalog()
+        before = self.old_cursor_files()
+        self.runtime.actions = ['fail', 'ok']
+        with self.assertRaisesRegex(ar.RuntimeBlocked, 'Previous mode was restored'):
+            self.apply('cursor')
+        self.assertEqual(self.old_cursor_files(), before)
+        self.assertEqual(self.runtime.live['config']['model_catalog_json'], str(old))
+        self.assertTrue(self.runtime.matches(self.runtime.live, tomllib.loads(before[0].decode())))
+        self.assertFalse(self.journal.exists())
+        self.assert_auth_preserved()
+
+    def test_catalog_upgrade_preserves_external_state_and_retains_recovery_journal(self):
+        self.install_old_catalog()
+        state_path = self.directory / 'cursor-fallback-state/state.json'
+        real_switch = sc.switch
+        def external_state(*args, **kwargs):
+            real_switch(*args, **kwargs)
+            state_path.write_bytes(state_path.read_bytes() + b'\n')
+        started = len(self.runtime.started)
+        with patch.object(rs, 'switch', side_effect=external_state):
+            with self.assertRaisesRegex(ar.RuntimeBlocked, 'recovery journal retained'):
+                self.apply('cursor')
+        self.assertTrue(state_path.read_bytes().endswith(b'\n'))
+        self.assertEqual(len(self.runtime.started), started)
+        self.assertTrue(self.journal.exists())
+        self.assert_auth_preserved()
+        with self.assertRaisesRegex(ar.RuntimeBlocked, 'External file changes'):
+            self.apply('cursor')
+        self.assertTrue(state_path.read_bytes().endswith(b'\n'))
+
+    def test_catalog_upgrade_after_double_start_failure_does_not_report_old_path_as_success(self):
+        self.install_old_catalog()
+        before = self.old_cursor_files()
+        self.runtime.actions = ['fail', 'fail']
+        with self.assertRaisesRegex(ar.RuntimeBlocked, 'recovery journal retained'):
+            self.apply('cursor')
+        with self.assertRaisesRegex(ar.RuntimeBlocked, 'Run the desired switch again'):
+            self.apply('cursor')
+        self.assertEqual(self.old_cursor_files(), before)
+        self.assertTrue(sc.status(self.directory)['catalog_path_upgrade_required'])
+        self.assertFalse(self.journal.exists())
+        self.apply('cursor')
+        self.assertFalse(sc.status(self.directory)['catalog_path_upgrade_required'])
+        self.assert_auth_preserved()
+
+    def test_catalog_upgrade_missing_backup_refuses_before_daemon_stop(self):
+        self.install_old_catalog()
+        (self.directory / 'cursor-fallback-state/state.json').unlink()
+        stopped = len(self.runtime.stopped)
+        with self.assertRaisesRegex(ar.RuntimeBlocked, 'No saved OpenAI baseline'):
+            self.apply('cursor')
+        self.assertEqual(len(self.runtime.stopped), stopped)
+        self.assertFalse(self.journal.exists())
+
     def test_bidirectional_switch_verifies_consumer_and_preserves_auth(self):
         first_pid = self.runtime.live['pid']
         cursor = self.apply('cursor')

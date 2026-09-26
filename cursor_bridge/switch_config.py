@@ -12,6 +12,11 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parent
 MIN_ADAPTER_VERSION = 3
+CATALOG_PATH_UPGRADE = (
+    "The Cursor model catalog points at an older installation. Disconnect the Desktop SSH remote, "
+    "then run cursor-bridge switch codex cursor --restart-daemon from a separate SSH terminal "
+    "to update the managed catalog path and verify the restarted daemon."
+)
 MANAGED = [(key,) for key in ("model", "model_provider", "model_catalog_json", "model_reasoning_effort",
                              "web_search")]
 MANAGED += [("features", "code_mode"), ("features", "code_mode_only"),
@@ -124,7 +129,10 @@ def write_state(path, state):
     atomic(path, json.dumps(state, ensure_ascii=False, indent=2).encode())
 
 
-def finish_transaction(directory, state_path, state):
+def finish_transaction(directory, state_path, state, expected_state=None):
+    expected_state = read(state_path) if expected_state is None else expected_state
+    if read(state_path) != expected_state:
+        raise ValueError("interrupted switch state conflicts with external changes")
     transaction = state["transaction"]
     # Multi-file updates are recoverable, not atomic. Check all files before any
     # recovery write; do not overwrite a third party's edits after interruption.
@@ -134,6 +142,8 @@ def finish_transaction(directory, state_path, state):
             raise ValueError("interrupted switch conflicts with external changes")
     for name in ("config.toml",):
         atomic(directory / name, decode(transaction[name]["after"]))
+    if read(state_path) != expected_state:
+        raise ValueError("switch state changed externally during transaction completion")
     if transaction["mode"] == "openai":
         atomic(state_path, None)
         return None
@@ -149,10 +159,10 @@ def verify_service(port):
         if health.get("service") != "cursor-sdk2api":
             raise ServiceNotReady("Unexpected local service; configuration was not switched.")
         if "namespace_functions" not in health.get("capabilities", []):
-            raise ServiceNotReady("Restart cursor-sdk2api with the repaired adapter before switching.")
+            raise ServiceNotReady("Run cursor-bridge restart codex with the repaired adapter before switching.")
         version = health.get("adapter_version")
         if not isinstance(version, int) or version < MIN_ADAPTER_VERSION or "image_inputs" not in health["capabilities"]:
-            raise ServiceNotReady("Restart cursor-sdk2api.service so it serves the image-capable adapter "
+            raise ServiceNotReady("Run cursor-bridge restart codex so it serves the image-capable adapter "
                                   f"(adapter_version {MIN_ADAPTER_VERSION}) before switching.")
     with opener.open(f"http://127.0.0.1:{port}/v1/models", timeout=3) as response:
         actual = {item["id"] for item in json.load(response)["data"]}
@@ -176,6 +186,19 @@ def service_report(port):
     if isinstance(health.get("progress"), dict):
         report["progress"] = health["progress"]
     return report
+
+
+def bundled_catalog():
+    catalog = ROOT / "assets/models.json"
+    models = json.loads(catalog.read_text())["models"]
+    if [m["slug"] for m in models] != [f"claude-opus-5-5-{effort}" for effort in ("high", "xhigh", "max")]:
+        raise ValueError("invalid bundled model catalog")
+    return catalog
+
+
+def catalog_path_upgrade_required(config):
+    return (config.get("model_provider", "openai") == "cursor"
+            and config.get("model_catalog_json") != str(ROOT / "assets/models.json"))
 
 
 def switch(directory, mode, port=8789, prepared=None):
@@ -208,7 +231,8 @@ def switch(directory, mode, port=8789, prepared=None):
                 prepared({'config': decode(transaction['config.toml']['after']),
                           'state': packed(final_state) if transaction['mode'] == 'cursor' else None},
                          state_bytes)
-            state = finish_transaction(directory, state_path, state)
+            state = finish_transaction(directory, state_path, state, expected_state=state_bytes)
+            state_bytes = read(state_path)
         config = read(directory / "config.toml")
         document = tomlkit.parse((config or b"").decode())
         provider = document.get("model_provider", "openai")
@@ -221,39 +245,45 @@ def switch(directory, mode, port=8789, prepared=None):
             if legacy and not interrupted_legacy and get(document, ('cli_auth_credentials_store',)) != state['installed'].get('cli_auth_credentials_store', {'present': False}):
                 raise ValueError('legacy credentials store changed externally')
             if mode == "cursor":
-                return
-            baseline = tomlkit.parse((decode(state["original_config"]) or b"").decode())
-            restore_paths = MANAGED + ([("cli_auth_credentials_store",)] if legacy else [])
-            for path in restore_paths:
-                source = get(baseline, path)
-                if source["present"]:
-                    value = baseline
-                    for part in path:
-                        value = value[part]
-                    source["value"] = value
-                assign(document, path, source)
-            # Remove only empty parent tables introduced by this switch.
-            for parent in ("features", "model_providers"):
-                if parent not in baseline and parent in document and not document[parent]:
-                    del document[parent]
-            new_config = tomlkit.dumps(document).encode()
-            if legacy:
-                # The old version removed auth. Rescue a missing file only;
-                # never replace a new login or a refreshed credential.
-                if read(directory / "auth.json") is None and state.get("original_auth") is not None:
-                    restore_missing_auth(directory / 'auth.json', decode(state['original_auth']))
-                state = {"version": 2, "original_config": state["original_config"],
-                         "installed": {k: v for k, v in state["installed"].items() if k != "cli_auth_credentials_store"}}
+                if not catalog_path_upgrade_required(document):
+                    return
+                verify_service(port)
+                catalog = bundled_catalog()
+                assign(document, ("model_catalog_json",), {"present": True, "value": str(catalog)})
+                # Change only the owned path. Preserve the OpenAI baseline and the user's selected tier.
+                state = {**state, "installed": {**state["installed"],
+                         "model_catalog_json": get(document, ("model_catalog_json",))}}
+                new_config = tomlkit.dumps(document).encode()
+            else:
+                baseline = tomlkit.parse((decode(state["original_config"]) or b"").decode())
+                restore_paths = MANAGED + ([("cli_auth_credentials_store",)] if legacy else [])
+                for path in restore_paths:
+                    source = get(baseline, path)
+                    if source["present"]:
+                        value = baseline
+                        for part in path:
+                            value = value[part]
+                        source["value"] = value
+                    assign(document, path, source)
+                # Remove only empty parent tables introduced by this switch.
+                for parent in ("features", "model_providers"):
+                    if parent not in baseline and parent in document and not document[parent]:
+                        del document[parent]
+                new_config = tomlkit.dumps(document).encode()
+                if legacy:
+                    # The old version removed auth. Rescue a missing file only;
+                    # never replace a new login or a refreshed credential.
+                    if read(directory / "auth.json") is None and state.get("original_auth") is not None:
+                        restore_missing_auth(directory / 'auth.json', decode(state['original_auth']))
+                    state = {"version": 2, "original_config": state["original_config"],
+                             "installed": {k: v for k, v in state["installed"].items() if k != "cli_auth_credentials_store"}}
         else:
             if provider != "openai":
                 raise ValueError("no OpenAI baseline for current provider")
             if mode == "openai":
                 return
             verify_service(port)
-            catalog = ROOT / "assets/models.json"
-            models = json.loads(catalog.read_text())["models"]
-            if [m["slug"] for m in models] != [f"claude-opus-5-5-{e}" for e in ("high", "xhigh", "max")]:
-                raise ValueError("invalid bundled model catalog")
+            catalog = bundled_catalog()
             values = {
                 "model": "claude-opus-5-5-high", "model_provider": "cursor",
                 "model_catalog_json": str(catalog), "model_reasoning_effort": "high",
@@ -280,8 +310,11 @@ def switch(directory, mode, port=8789, prepared=None):
             prepared({"config": new_config,
                       "state": packed(final_state) if mode == "cursor" else None},
                      packed(state))
+        if read(directory / "config.toml") != config or read(state_path) != state_bytes:
+            raise ValueError("configuration or switch state changed during switch preparation")
+        staged = json.dumps(state, ensure_ascii=False, indent=2).encode()
         write_state(state_path, state)
-        finish_transaction(directory, state_path, state)
+        finish_transaction(directory, state_path, state, expected_state=staged)
 
 
 def status(directory):
@@ -290,13 +323,19 @@ def status(directory):
     pending = json.loads(read(state) or b"{}")
     runtime_journal = directory / "cursor-fallback-state/runtime-transition.json"
     transition = json.loads(read(runtime_journal) or b"{}")
-    return {"provider": config.get("model_provider", "openai"), "model": config.get("model"),
+    upgrade = catalog_path_upgrade_required(config)
+    report = {"provider": config.get("model_provider", "openai"), "model": config.get("model"),
             "model_catalog_json": config.get("model_catalog_json"),
+            "expected_model_catalog_json": str(ROOT / "assets/models.json"),
+            "catalog_path_upgrade_required": upgrade,
             "auth_file_present": read(directory / "auth.json") is not None,
             "openai_config_backup_present": bool(pending), "auth_policy": "preserved",
             "transaction_pending": "transaction" in pending or bool(transition),
             "runtime_transition": {key: transition.get(key) for key in ("mode", "phase")} if transition else None,
             "managed_config_conflict": bool(pending and not matches_installed(config, pending))}
+    if upgrade:
+        report["next_step"] = CATALOG_PATH_UPGRADE
+    return report
 
 
 def main():
@@ -321,19 +360,20 @@ def main():
             result["runtime_matches_config"] = runtime.matches(observed, config)
             if catalog_reload_required(observed, config):
                 result["catalog_reload_required"] = True
-                result["next_step"] = STALE_CATALOG
+                result.setdefault("next_step", STALE_CATALOG)
         except Exception as exc:
             result["runtime"] = {"state": "unverified", "error_type": type(exc).__name__}
             result["runtime_matches_config"] = False
         result["service"] = service_report(args.port)
         if result["provider"] == "cursor" and not result["service"].get("image_inputs"):
-            result["service"]["next_step"] = ("Restart cursor-sdk2api.service (systemctl --user restart "
-                                              "cursor-sdk2api.service) so it serves the image-capable adapter.")
+            result["service"]["next_step"] = ("Run cursor-bridge restart codex when idle so the service "
+                                              "uses the image-capable adapter.")
         print(json.dumps(result, ensure_ascii=False))
         if args.command != "status":
-            if not result['runtime_matches_config'] or result['transaction_pending']:
+            if (not result['runtime_matches_config'] or result['transaction_pending']
+                    or (args.command == 'cursor' and result['catalog_path_upgrade_required'])):
                 from cursor_bridge.appserver_runtime import RuntimeBlocked
-                raise RuntimeBlocked('Final runtime verification changed or is pending; inspect status before reconnecting.')
+                raise RuntimeBlocked('Final runtime verification changed, catalog upgrade is pending, or a transaction remains; inspect status before reconnecting.')
             print("Remote daemon provider and model list verified. Reconnect Desktop; create a NEW task for the new provider.")
     except Exception as exc:
         from cursor_bridge.appserver_runtime import RuntimeBlocked
