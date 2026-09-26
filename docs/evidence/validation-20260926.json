@@ -1,0 +1,18 @@
+{
+  "source_commit": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+  "command": "PYTHONDONTWRITEBYTECODE=1 ~/.codex/cursor-sdk2api/venv/bin/python -m unittest discover -s tests -p 'test_*.py'",
+  "tests": 322,
+  "passed": true,
+  "duration_s": 45.157,
+  "modes_covered": [
+    "legacy",
+    "reuse",
+    "native"
+  ],
+  "systemd_validation": "Generated unit text also passed the real systemd-analyze --user verify parser, including paths with spaces and percent specifiers.",
+  "pending_acceptance": [
+    "Codex default-provider new task after user-operated daemon switch",
+    "Skill source migration and publication",
+    "Both repository remotes published"
+  ]
+}

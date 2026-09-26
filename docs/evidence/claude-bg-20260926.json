@@ -1,0 +1,70 @@
+{
+  "assistant_message_count": 1,
+  "cwd": "/data00/home/zhudelin123/source/zhudelin123-skills",
+  "exact_marker": true,
+  "finished_at": "2026-09-26T11:36:14.339852+00:00",
+  "marker_present": true,
+  "mode": "real_cli_config",
+  "passed": true,
+  "poll_seconds": 15,
+  "private_log_dir": "/tmp/cursor-bridge-claude-bg-_1p24j7k",
+  "schema_version": 1,
+  "session_id": "75bf319e-bee0-4274-9aae-b6a862b3b55d",
+  "session_name": "cursor-bridge-bg-accept-7e503e4326ac",
+  "short_id": "75bf319e",
+  "started_at": "2026-09-26T11:35:09.335608+00:00",
+  "state": "done",
+  "summary_request_note": "A separate high summary may occur; service usage metadata must account for it independently.",
+  "tool_use_count": 0,
+  "tools": [],
+  "usage_by_model": {
+    "claude-opus-5-5-max": {
+      "cache_creation_input_tokens": 9860,
+      "cache_read_input_tokens": 0,
+      "input_tokens": 4,
+      "output_tokens": 429
+    }
+  },
+  "usage_scope": "deduplicated assistant message IDs in this exact main transcript; separate summary requests may be omitted",
+  "release": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+  "service_inferences": [
+    {
+      "model": "claude-opus-5-5-max",
+      "outcome": "completed",
+      "duration_s": 32.562,
+      "usage": {
+        "input_tokens": 9864,
+        "output_tokens": 429,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 9860
+      },
+      "reuse_mode": "cold",
+      "reuse_reason": "no_direct_successor",
+      "send_chars": 18746,
+      "engine": "native"
+    },
+    {
+      "model": "claude-opus-5-5-high",
+      "outcome": "completed",
+      "duration_s": 15.102,
+      "usage": {
+        "input_tokens": 10640,
+        "output_tokens": 88,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 10636
+      },
+      "reuse_mode": "cold",
+      "reuse_reason": "no_direct_successor",
+      "send_chars": 18396,
+      "engine": "native"
+    }
+  ],
+  "http_requests": 2,
+  "service_usage_note": "Windowed metadata includes background summarization; no other inference was observed in this acceptance window.",
+  "total_sdk_usage": {
+    "input_tokens": 20504,
+    "output_tokens": 517,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 20496
+  }
+}

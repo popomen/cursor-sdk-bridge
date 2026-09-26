@@ -1,0 +1,122 @@
+{
+  "timestamp_utc": "2026-09-26T11:23:16.768318+00:00",
+  "release": "47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+  "production_services_changed": false,
+  "services": {
+    "codex": {
+      "port": 18789,
+      "health": {
+        "running_version": "47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+        "mode": "native",
+        "draining": false,
+        "unfinished": 0,
+        "service": "cursor-sdk2api",
+        "status": "ready",
+        "adapter_version": 3,
+        "capabilities": [
+          "namespace_functions",
+          "image_inputs",
+          "structured_text_outputs",
+          "safe_error_paths",
+          "failure_labels",
+          "data_keepalive",
+          "sdk_progress",
+          "anthropic_messages",
+          "native_tools",
+          "live_deltas",
+          "durable_dedup",
+          "disconnect_continuation"
+        ],
+        "progress": {
+          "queued": 0,
+          "active": null,
+          "pending_tools": 0,
+          "open_runs": 0
+        },
+        "limits": {
+          "deadlines": {
+            "high": 1200.0,
+            "xhigh": 1200.0,
+            "max": 1200.0
+          },
+          "queue_timeout": 1200.0,
+          "pending_timeout": 600
+        }
+      },
+      "unit": {
+        "MainPID": "735681",
+        "WorkingDirectory": "/data00/home/zhudelin123/.local/share/cursor-bridge/47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+        "ActiveState": "active",
+        "FragmentPath": "/home/zhudelin123/.config/systemd/user/cursor-bridge-codex.service",
+        "UnitFileState": "enabled",
+        "Transient": "no"
+      }
+    },
+    "claude": {
+      "port": 18790,
+      "health": {
+        "running_version": "47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+        "mode": "native",
+        "draining": false,
+        "unfinished": 0,
+        "service": "cursor-sdk2api",
+        "status": "ready",
+        "adapter_version": 3,
+        "capabilities": [
+          "namespace_functions",
+          "image_inputs",
+          "structured_text_outputs",
+          "safe_error_paths",
+          "failure_labels",
+          "data_keepalive",
+          "sdk_progress",
+          "anthropic_messages",
+          "native_tools",
+          "live_deltas",
+          "durable_dedup",
+          "disconnect_continuation"
+        ],
+        "progress": {
+          "queued": 0,
+          "active": null,
+          "pending_tools": 0,
+          "open_runs": 0
+        },
+        "limits": {
+          "deadlines": {
+            "high": 1200.0,
+            "xhigh": 1200.0,
+            "max": 1800.0
+          },
+          "queue_timeout": 1800.0,
+          "pending_timeout": 600
+        }
+      },
+      "unit": {
+        "MainPID": "735682",
+        "WorkingDirectory": "/data00/home/zhudelin123/.local/share/cursor-bridge/47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+        "ActiveState": "active",
+        "FragmentPath": "/home/zhudelin123/.config/systemd/user/cursor-bridge-claude.service",
+        "UnitFileState": "enabled",
+        "Transient": "no"
+      }
+    },
+    "dashboard": {
+      "port": 18791,
+      "health": {
+        "service": "cursor-bridge-dashboard",
+        "status": "ready",
+        "running_version": "47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+        "deployed_version": "47e9ec7afaf6d445ec0db94f2724536c6c94afc4"
+      },
+      "unit": {
+        "MainPID": "735683",
+        "WorkingDirectory": "/data00/home/zhudelin123/.local/share/cursor-bridge/47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+        "ActiveState": "active",
+        "FragmentPath": "/home/zhudelin123/.config/systemd/user/cursor-bridge-dashboard.service",
+        "UnitFileState": "enabled",
+        "Transient": "no"
+      }
+    }
+  }
+}

@@ -1,0 +1,214 @@
+{
+  "timestamp_utc": "2026-09-26T11:36:43.484328+00:00",
+  "release": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+  "services": {
+    "codex": {
+      "port": 8789,
+      "health": {
+        "running_version": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+        "mode": "native",
+        "draining": false,
+        "unfinished": 0,
+        "service": "cursor-sdk2api",
+        "status": "ready",
+        "adapter_version": 3,
+        "capabilities": [
+          "namespace_functions",
+          "image_inputs",
+          "structured_text_outputs",
+          "safe_error_paths",
+          "failure_labels",
+          "data_keepalive",
+          "sdk_progress",
+          "anthropic_messages",
+          "native_tools",
+          "live_deltas",
+          "durable_dedup",
+          "disconnect_continuation"
+        ],
+        "progress": {
+          "queued": 0,
+          "active": null,
+          "pending_tools": 0,
+          "open_runs": 0
+        },
+        "limits": {
+          "deadlines": {
+            "high": 1200.0,
+            "xhigh": 1200.0,
+            "max": 1200.0
+          },
+          "queue_timeout": 1200.0,
+          "pending_timeout": 600
+        }
+      },
+      "unit": {
+        "MainPID": "758450",
+        "WorkingDirectory": "/data00/home/zhudelin123/.local/share/cursor-bridge/396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+        "ActiveState": "active",
+        "FragmentPath": "/home/zhudelin123/.config/systemd/user/cursor-bridge-codex.service",
+        "DropInPaths": "",
+        "UnitFileState": "enabled",
+        "Transient": "no"
+      },
+      "connections": 0
+    },
+    "claude": {
+      "port": 8790,
+      "health": {
+        "running_version": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+        "mode": "native",
+        "draining": false,
+        "unfinished": 0,
+        "service": "cursor-sdk2api",
+        "status": "ready",
+        "adapter_version": 3,
+        "capabilities": [
+          "namespace_functions",
+          "image_inputs",
+          "structured_text_outputs",
+          "safe_error_paths",
+          "failure_labels",
+          "data_keepalive",
+          "sdk_progress",
+          "anthropic_messages",
+          "native_tools",
+          "live_deltas",
+          "durable_dedup",
+          "disconnect_continuation"
+        ],
+        "progress": {
+          "queued": 0,
+          "active": null,
+          "pending_tools": 0,
+          "open_runs": 0
+        },
+        "limits": {
+          "deadlines": {
+            "high": 1200.0,
+            "xhigh": 1200.0,
+            "max": 1800.0
+          },
+          "queue_timeout": 1800.0,
+          "pending_timeout": 600
+        }
+      },
+      "unit": {
+        "MainPID": "758433",
+        "WorkingDirectory": "/data00/home/zhudelin123/.local/share/cursor-bridge/396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+        "ActiveState": "active",
+        "FragmentPath": "/home/zhudelin123/.config/systemd/user/cursor-bridge-claude.service",
+        "DropInPaths": "",
+        "UnitFileState": "enabled",
+        "Transient": "no"
+      },
+      "connections": 0
+    },
+    "dashboard": {
+      "port": 8791,
+      "health": {
+        "service": "cursor-bridge-dashboard",
+        "status": "ready",
+        "running_version": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+        "deployed_version": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2"
+      },
+      "unit": {
+        "MainPID": "758482",
+        "WorkingDirectory": "/data00/home/zhudelin123/.local/share/cursor-bridge/396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+        "ActiveState": "active",
+        "FragmentPath": "/home/zhudelin123/.config/systemd/user/cursor-bridge-dashboard.service",
+        "DropInPaths": "",
+        "UnitFileState": "enabled",
+        "Transient": "no"
+      },
+      "connections": 0
+    }
+  },
+  "dashboard": [
+    {
+      "name": "codex",
+      "state": "idle",
+      "queued": 0,
+      "unfinished": 0,
+      "connections": 0,
+      "running_version": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+      "deployed_version": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+      "needs_restart": false
+    },
+    {
+      "name": "claude",
+      "state": "idle",
+      "queued": 0,
+      "unfinished": 0,
+      "connections": 0,
+      "running_version": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+      "deployed_version": "396dd20ffa0ec2f111d2b2408adb2b76c7469fa2",
+      "needs_restart": false
+    }
+  ],
+  "linger": "yes",
+  "old_units": {
+    "cursor-sdk2api.service": "inactive",
+    "cursor-sdk2api-claude.service": "inactive",
+    "cursor-sdk2api-dashboard.service": "inactive"
+  },
+  "state_preserved": {
+    "/home/zhudelin123/.codex/cursor-sdk2api": {
+      "same_inode": true,
+      "same_mode": true,
+      "mode": "0o755"
+    },
+    "/home/zhudelin123/.codex/cursor-sdk2api-claude": {
+      "same_inode": true,
+      "same_mode": true,
+      "mode": "0o700"
+    },
+    "/home/zhudelin123/.codex/cursor-fallback-state": {
+      "same_inode": true,
+      "same_mode": true,
+      "mode": "0o700"
+    },
+    "/home/zhudelin123/.codex/cursor-sdk-api-key": {
+      "same_inode": true,
+      "same_mode": true,
+      "mode": "0o600"
+    }
+  },
+  "claude": {
+    "provider": "cursor",
+    "base_url": "http://127.0.0.1:8790",
+    "model": "claude-opus-5-5-xhigh[1m]",
+    "models": {
+      "ANTHROPIC_MODEL": "claude-opus-5-5-max[1m]",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5-max[1m]",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-opus-5-5-max[1m]",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-opus-5-5-high[1m]",
+      "CLAUDE_CODE_SUBAGENT_MODEL": "claude-opus-5-5-max[1m]"
+    },
+    "backup_present": true,
+    "service": {
+      "port": 8790,
+      "state": "ready",
+      "anthropic_messages": true,
+      "progress": {
+        "queued": 0,
+        "active": null,
+        "pending_tools": 0,
+        "open_runs": 0
+      },
+      "limits": {
+        "deadlines": {
+          "high": 1200.0,
+          "xhigh": 1200.0,
+          "max": 1800.0
+        },
+        "queue_timeout": 1800.0,
+        "pending_timeout": 600
+      }
+    },
+    "update_available": false
+  },
+  "codex_daemon_switch_pending": true,
+  "initial_cutover_release": "47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+  "release_update_note": "396dd20 changes only operator-facing command hints; engine acceptance remains applicable from 47e9ec7."
+}

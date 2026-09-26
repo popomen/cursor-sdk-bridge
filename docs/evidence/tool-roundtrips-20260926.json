@@ -1,0 +1,76 @@
+{
+  "timestamp_utc": "2026-09-26T11:24:38.672086+00:00",
+  "release": "47e9ec7afaf6d445ec0db94f2724536c6c94afc4",
+  "scope": "native full-adapter synthetic tool roundtrips on persistent units at temporary ports",
+  "results": [
+    {
+      "instance": "codex",
+      "port": 18789,
+      "mode": "native",
+      "effort": "high",
+      "sdk_outputs": 2,
+      "namespace_roundtrip": true,
+      "success": true,
+      "elapsed_s": 63.726,
+      "calls": [
+        {
+          "model": "claude-opus-5-5-high",
+          "outcome": "completed",
+          "duration_s": 36.587,
+          "reuse_mode": "cold",
+          "reuse_reason": "no_direct_successor",
+          "send_chars": 697
+        },
+        {
+          "model": "claude-opus-5-5-high",
+          "outcome": "completed",
+          "duration_s": 27.12,
+          "usage": {
+            "input_tokens": 3433,
+            "output_tokens": 24,
+            "cache_read_tokens": 2374,
+            "cache_write_tokens": 1055
+          },
+          "reuse_mode": "cold",
+          "reuse_reason": "tool_continuation_policy_changed",
+          "send_chars": 1193
+        }
+      ]
+    },
+    {
+      "instance": "claude",
+      "port": 18790,
+      "mode": "native",
+      "api": "messages",
+      "effort": "high",
+      "sdk_outputs": 2,
+      "tool_roundtrip": true,
+      "success": true,
+      "elapsed_s": 60.161,
+      "calls": [
+        {
+          "model": "claude-opus-5-5-high",
+          "outcome": "completed",
+          "duration_s": 30.427,
+          "reuse_mode": "cold",
+          "reuse_reason": "no_direct_successor",
+          "send_chars": 728
+        },
+        {
+          "model": "claude-opus-5-5-high",
+          "outcome": "completed",
+          "duration_s": 29.715,
+          "usage": {
+            "input_tokens": 3413,
+            "output_tokens": 163,
+            "cache_read_tokens": 2374,
+            "cache_write_tokens": 1035
+          },
+          "reuse_mode": "cold",
+          "reuse_reason": "tool_continuation_policy_changed",
+          "send_chars": 1160
+        }
+      ]
+    }
+  ]
+}
