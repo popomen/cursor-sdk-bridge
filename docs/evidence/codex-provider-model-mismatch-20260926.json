@@ -1,0 +1,49 @@
+{
+  "date": "2026-09-26",
+  "source_commit": "57b0641",
+  "deployed_commit": "1662b28f2c7724f44c0c31fb897188c4d81e3636",
+  "incident": {
+    "switch_to_cursor_runtime_matches_config": true,
+    "restore_to_openai_runtime_matches_config": true,
+    "existing_thread_provider": "openai",
+    "model_at_failure": "claude-opus-5-5-xhigh",
+    "error_category": "model_not_supported_with_chatgpt_account",
+    "provider_changed_by_model_selection": false,
+    "recovered_thread_model": "gpt-6-astra",
+    "recovered_thread_effort": "ultra",
+    "new_cursor_bound_thread_observed_in_incident_window": false,
+    "evidence_sources": [
+      "user_supplied_switch_and_restore_status",
+      "local_thread_settings_and_turn_context_metadata",
+      "local_app_server_error_metadata"
+    ],
+    "ui_action_source_known": false
+  },
+  "isolated_probe": {
+    "module": "cursor_bridge.probe_desktop",
+    "arguments": ["--stub", "--effort", "xhigh"],
+    "native_codex_executable": true,
+    "private_sqlite_and_log_directories": true,
+    "ephemeral_new_thread": true,
+    "provider": "cursor_desktop_probe",
+    "model": "claude-opus-5-5-xhigh",
+    "passed": true,
+    "account_type_reported_by_custom_provider": null,
+    "requires_openai_auth": false,
+    "model_catalog_verified": true,
+    "turn_status": "completed",
+    "stub_generations": 2,
+    "real_sdk_generations": 0,
+    "synthetic_tool_calls": 1,
+    "namespace_and_call_id_verified": true,
+    "final_message_verified": true,
+    "auth_bytes_unchanged": true,
+    "appserver_stderr_lines_discarded": 0
+  },
+  "limitations": [
+    "The isolated probe explicitly selects a custom provider and uses a stub backend.",
+    "It does not validate Desktop UI task creation or a real Cursor SDK request through the default provider.",
+    "A null account field is the response observed under the custom provider; it does not establish the account type used by OpenAI-bound threads.",
+    "Existing thread providers and production client configuration were not migrated by this probe."
+  ]
+}
