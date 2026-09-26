@@ -16,6 +16,7 @@ from cursor_bridge.anthropic_protocol import (ERROR_TYPES, complete_message, err
                                 message_shell, prepare_messages, stream_events)
 from cursor_bridge.failures import InvalidModelOutput, PromptTooLarge, RequestTimeout, error_code, failure_label
 from cursor_bridge.request_log import REQUEST_STATS, RequestLog
+from cursor_bridge.ledger import ResultLedger, request_digest
 from cursor_bridge.responses_protocol import (InvalidRequest, MODELS, complete_response, completion_events,
                                 prepare_request, response_shell, strict_json)
 
@@ -39,7 +40,8 @@ def model_list():
 
 
 class Service:
-    def __init__(self, backend, timeout=None, log=None, max_prompt_bytes=MAX_PROMPT_BYTES):
+    def __init__(self, backend, timeout=None, log=None, max_prompt_bytes=MAX_PROMPT_BYTES,
+                 ledger_path=None, ledger_ttl=3600, mode="legacy"):
         self.backend, self.timeout, self.log = backend, timeout, log
         self.max_prompt_bytes = max_prompt_bytes
         self.loop = asyncio.new_event_loop()
@@ -47,7 +49,9 @@ class Service:
         self.thread.start()
         self.cache, self.cache_lock = OrderedDict(), threading.Lock()
         self.admission = threading.BoundedSemaphore(8)
-        self.submit_lock, self.closing = threading.Lock(), False
+        self.submit_lock, self.closing = threading.RLock(), False
+        self.draining, self.jobs, self.mode = False, {}, mode
+        self.ledger = ResultLedger(ledger_path, ttl=ledger_ttl) if ledger_path else None
 
     def deadline(self, model):
         if self.timeout is not None:
@@ -79,7 +83,11 @@ class Service:
             async with scope:
                 # Text-only backends (probes, fixtures) accept no images argument.
                 extra = {"images": images} if images else {}
-                text = await self.backend.generate(body["model"], prompt, **extra)
+                generate_request = getattr(self.backend, "generate_request", None)
+                if generate_request:
+                    text = await generate_request(body["model"], prompt, body, history, **extra)
+                else:
+                    text = await self.backend.generate(body["model"], prompt, **extra)
         except TimeoutError:
             if scope.expired():
                 raise RequestTimeout() from None
@@ -88,6 +96,13 @@ class Service:
             response = complete_response(shell, text, body, history)
         except Exception:
             raise InvalidModelOutput() from None
+        commit = getattr(self.backend, "commit_response", None)
+        if commit:
+            commit(history, body, response, getattr(text, "reuse_token", None))
+        self._remember(body, history, response)
+        return response
+
+    def _remember(self, body, history, response):
         if body.get("store", True):
             with self.cache_lock:
                 items = history + response["output"]
@@ -96,19 +111,70 @@ class Service:
                 # volatile and intentionally excludes stored SDK credentials.
                 while len(self.cache) > 32 or sum(v[2] for v in self.cache.values()) > MAX_CACHE_BYTES:
                     self.cache.popitem(last=False)
-        return response
+
+    async def _run_job(self, digest, shell, body, history, prompt, stats, images):
+        began = time.monotonic()
+        outcome = "completed"
+        try:
+            result = await self._generate(shell, body, history, prompt, stats, images)
+            if self.ledger:
+                self.ledger.put(digest, result, stats)
+            return result
+        except BaseException as exc:
+            outcome = "service_stopped" if isinstance(exc, asyncio.CancelledError) else failure_label(exc)
+            raise
+        finally:
+            if self.ledger:
+                self.record(event="inference", model=body["model"], **stats, outcome=outcome,
+                            duration_s=round(time.monotonic() - began, 3))
+
+    def lifecycle(self):
+        with self.submit_lock:
+            pending = getattr(self.backend, "pending_count", lambda: 0)()
+            return {"draining": self.draining, "unfinished": len(self.jobs) + pending}
 
     def submit(self, shell, body, history, prompt, stats=None, images=()):
+        stats = stats if stats is not None else {}
+        digest = request_digest(body, history, self.mode)
         with self.submit_lock:
-            if self.closing:
-                raise RuntimeError("service is shutting down")
-            return asyncio.run_coroutine_threadsafe(self._generate(shell, body, history, prompt, stats, images), self.loop)
+            if self.closing or self.draining:
+                raise RuntimeError("service is draining")
+            if self.ledger:
+                existing = self.jobs.get(digest)
+                if existing:
+                    future, prior_shell, prior_stats = existing
+                    shell.update(prior_shell)
+                    def joined(done):
+                        stats.update(prior_stats, dedup="joined")
+                    future.add_done_callback(joined)
+                    return future
+                saved = self.ledger.get(digest)
+                if saved:
+                    response = saved["response"]
+                    shell.update({key: response[key] for key in ("id", "created_at", "model")})
+                    stats.update(saved["stats"], dedup="hit")
+                    self._remember(body, history, response)
+                    future = concurrent.futures.Future()
+                    future.set_result(response)
+                    return future
+            if len(self.jobs) >= 8:
+                raise RuntimeError("inference queue is full")
+            # Keep separate jobs in fixtures/explicit no-ledger mode.
+            key = digest if self.ledger else shell["id"]
+            future = asyncio.run_coroutine_threadsafe(
+                self._run_job(digest, shell, body, history, prompt, stats, images), self.loop)
+            self.jobs[key] = (future, dict(shell), stats)
+            def finished(done):
+                with self.submit_lock:
+                    self.jobs.pop(key, None)
+            future.add_done_callback(finished)
+            return future
 
     async def _close(self):
         tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
         # Cancel requests first; shielded SDK launch tasks must retain their
         # internal deadline and ownership cleanup rather than be cancelled here.
-        tasks = [task for task in tasks if task.get_coro().__qualname__.endswith("Service._generate")]
+        tasks = [task for task in tasks if task.get_coro().__qualname__.endswith("Service._run_job")]
         for task in tasks:
             task.cancel()
         if tasks:
@@ -125,6 +191,8 @@ class Service:
             self.loop.call_soon_threadsafe(self.loop.stop)
             self.thread.join(timeout=5)
             self.loop.close()
+            if self.ledger:
+                self.ledger.close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -157,7 +225,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/health":
             backend = self.server.service.backend
             progress, limits = getattr(backend, "progress", None), getattr(backend, "limits", None)
-            self._json(200, {"service": "cursor-sdk2api", "status": "ready", "adapter_version": 3,
+            from cursor_bridge.version import running_version
+            self._json(200, {"running_version": running_version(), "mode": self.server.service.mode,
+                             **self.server.service.lifecycle(), "service": "cursor-sdk2api", "status": "ready", "adapter_version": 3,
                              "capabilities": ["namespace_functions", "image_inputs", "structured_text_outputs", "safe_error_paths",
                                               "failure_labels", "data_keepalive", "sdk_progress", "anthropic_messages"],
                              "progress": progress() if progress else None,
@@ -169,6 +239,23 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         anthropic = path.startswith("/v1/messages")
         fail, api = (self._anthropic_error, {"api": "messages"}) if anthropic else (self._error, {})
+        if path in ("/admin/drain", "/admin/resume"):
+            if self.headers.get("Origin") or self.headers.get("Transfer-Encoding"):
+                return fail(400, "unsupported admin request")
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                return fail(400, "invalid admin request")
+            if not 0 <= length <= 16:
+                return fail(400, "invalid admin request")
+            self.connection.settimeout(5)
+            if length:
+                self.rfile.read(length)
+            service = self.server.service
+            with service.submit_lock:
+                service.draining = path == "/admin/drain"
+                state = service.lifecycle()
+            return self._json(409 if state["draining"] and state["unfinished"] else 200, state)
         if path not in POST_PATHS:
             return fail(404, "unknown endpoint")
         # No browser-origin requests: local tools can use HTTP without CORS.
@@ -215,6 +302,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
+            if entry["prompt_bytes"] <= service.max_prompt_bytes:
+                future = service.submit(shell, body, history, prompt, stats, images)
             if streaming:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -226,7 +315,6 @@ class Handler(BaseHTTPRequestHandler):
                 emit("response.in_progress", {"response": shell})
             if entry["prompt_bytes"] > service.max_prompt_bytes:
                 raise PromptTooLarge()
-            future = service.submit(shell, body, history, prompt, stats, images)
             # SSE comments do not reset the Codex stream idle timer; data events do.
             while not concurrent.futures.wait([future], timeout=KEEPALIVE_SECONDS).done:
                 if streaming:
@@ -239,8 +327,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, result)
         except (BrokenPipeError, ConnectionResetError):
             outcome = "client_disconnected"
-            if future:
-                future.cancel()
+            # The service owns inference; HTTP disconnect never cancels it.
         except Exception as exc:
             # Labels are adapter-owned constants or class names; exception strings
             # may contain upstream requests, credentials or private prompts.
@@ -290,8 +377,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, result)
         except (BrokenPipeError, ConnectionResetError):
             outcome = "client_disconnected"
-            if future:
-                future.cancel()
+            # The service owns inference; HTTP disconnect never cancels it.
         except Exception as exc:
             outcome = failure_label(exc)
             status, error = failure_error(outcome, entry["prompt_bytes"], service.max_prompt_bytes)
@@ -320,6 +406,9 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8789)
+    parser.add_argument("--mode", choices=("legacy", "reuse", "native"), default="legacy")
+    parser.add_argument("--no-ledger", action="store_true", help="disable retry deduplication")
+    parser.add_argument("--dedup-ttl", type=float, default=3600)
     parser.add_argument("--state-dir", type=Path, default=Path.home() / ".codex/cursor-sdk2api")
     parser.add_argument("--key-file", type=Path, default=Path.home() / ".codex/cursor-sdk-api-key")
     parser.add_argument("--timeout", type=float, help="SDK deadline in seconds for every effort")
@@ -346,10 +435,18 @@ def main():
     if args.max_prompt_bytes <= 0:
         parser.error("--max-prompt-bytes must be positive")
     os.umask(0o077)
-    backend = SDKBackend(args.key_file, args.state_dir / "workspace", route=args.route, timeouts=timeouts,
+    backend_type = SDKBackend
+    if args.mode == "reuse":
+        from cursor_bridge.reuse_backend import ReuseSDKBackend
+        backend_type = ReuseSDKBackend
+    elif args.mode == "native":
+        parser.error("native mode is not yet available; use reuse or legacy")
+    backend = backend_type(args.key_file, args.state_dir / "workspace", route=args.route, timeouts=timeouts,
                          queue_timeout=args.queue_timeout)
     service = Service(backend, log=RequestLog(args.log_dir or args.state_dir / "logs"),
-                      max_prompt_bytes=args.max_prompt_bytes)
+                      max_prompt_bytes=args.max_prompt_bytes, mode=args.mode,
+                      ledger_path=None if args.no_ledger else args.state_dir / "results.sqlite3",
+                      ledger_ttl=args.dedup_ttl)
     server = make_server(service, args.port)
     def stop(signum, frame):
         raise KeyboardInterrupt
