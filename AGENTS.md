@@ -1,5 +1,7 @@
 # Cursor SDK Bridge
 
+Project operations use [cursor-sdk-bridge-ops](.agents/skills/cursor-sdk-bridge-ops/SKILL.md). Keep this skill in the repository; do not install it into user-wide skill directories.
+
 Work on main in this checkout. Do not touch production services unless the task authorizes it; confirm progress, queued requests, and open connections are idle immediately before any restart. Never stop the Codex daemon from its own active task.
 
 Preserve existing state directories and credentials. Never print or commit credentials, request bodies, tool results, or private model output. Runtime request logs contain metadata only. Run deterministic tests with:
