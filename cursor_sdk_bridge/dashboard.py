@@ -455,9 +455,8 @@ def card(item):
     limit_text = '未上报'
     if limits:
         deadlines = limits.get('deadlines') or {}
-        limit_text = 'high %s / xhigh %s / max %s，排队上限 %s' % tuple(
-            seconds(value) for value in (deadlines.get('high'), deadlines.get('xhigh'), deadlines.get('max'),
-                                          limits.get('queue_timeout')))
+        limit_text = ' / '.join('%s %s' % (effort, seconds(value)) for effort, value in deadlines.items())
+        limit_text += '，排队上限 %s' % seconds(limits.get('queue_timeout'))
     active_text = '未知' if item['state'] in ('offline', 'legacy') else '无'
     if active:
         active_text = '%s：已运行 %s / 时限 %s，SDK 事件 %s，距上次事件 %s' % (

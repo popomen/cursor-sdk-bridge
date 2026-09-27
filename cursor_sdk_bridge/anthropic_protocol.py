@@ -121,7 +121,7 @@ def convert_choice(choice):
 def prepare_messages(body):
     """Return an equivalent Responses body with its history, prompt and images for the shared SDK path."""
     if not isinstance(body, dict) or body.get("model") not in MODELS:
-        raise InvalidRequest("model must be an Opus 5.5 high, xhigh or max alias", "model")
+        raise InvalidRequest("model must be an advertised Opus 5.5 variant; see /v1/models", "model")
     if not isinstance(body.get("stream", False), bool):
         raise InvalidRequest("stream must be boolean", "stream")
     choice, parallel = convert_choice(body.get("tool_choice"))

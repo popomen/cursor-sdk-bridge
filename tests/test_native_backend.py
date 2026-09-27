@@ -164,6 +164,16 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.005)
         self.fail("run did not become idle")
 
+    async def test_every_variant_reaches_native_sdk_unchanged(self):
+        from test_models import VARIANTS, expected_selection
+        for alias, context, effort, fast in VARIANTS:
+            with self.subTest(model=alias):
+                self.sdk.scripts.append([("text", "answer")])
+                await self.turn([{"role": "user", "content": "hello"}], model=alias)
+                await self.idle()
+                self.assertEqual(self.sdk.created[-1].options.model,
+                                 expected_selection(context, effort, fast))
+
     async def test_native_text_streaming_and_resume_only_latest_input(self):
         self.sdk.scripts = [[("thinking", "consider"), ("text", "first answer")], [("text", "second answer")]]
         history, events = [{"role": "user", "content": "first private turn"}], []

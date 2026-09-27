@@ -219,9 +219,7 @@ class ReuseSDKBackend(SDKBackend):
                 parent = self._completed.pop(key)
                 next_prompt, next_images = continuation_prompt(history[end:], incoming_ids, parent.calls)
                 break
-        selection = {"id": "claude-opus-5-5", "params": [
-            {"id": "context", "value": "1m"}, {"id": "effort", "value": MODELS[model]},
-            {"id": "fast", "value": "false"}]}
+        selection = MODELS[model].selection()
         options = AgentOptions(api_key=self.key, model=selection, tools=[],
             disallowed_tools=["mcp", "task", "shell"],
             local=LocalAgentOptions(cwd=str(self.workspace), setting_sources=[], store={"type": "sqlite"}))

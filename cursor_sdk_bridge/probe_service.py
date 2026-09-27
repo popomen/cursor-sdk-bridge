@@ -9,16 +9,19 @@ import urllib.error
 import urllib.request
 import zlib
 
+from cursor_sdk_bridge.models import EFFORTS, MODELS
 
 # Default service SDK deadlines plus queue margin; data keepalives do not end a blocking POST.
-CLIENT_TIMEOUTS = {'high': 1235, 'xhigh': 1235, 'max': 1235}
+CLIENT_TIMEOUTS = {effort: 1235 for effort in EFFORTS}
 
 
 class ProbeFailed(RuntimeError):
     pass
 
 
-def probe(port=8789, effort='high'):
+def probe(port=8789, effort='high', *, model=None):
+    model = model or 'claude-opus-5-5-' + effort
+    effort = MODELS[model].effort
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     marker = 'FALLBACK_PROBE_OK_' + secrets.token_hex(8)
     result_marker = 'FALLBACK_RESULT_' + secrets.token_hex(8)
@@ -30,7 +33,7 @@ def probe(port=8789, effort='high'):
                                       'required': ['value'], 'additionalProperties': False}}]}
 
     def post(choice):
-        body = {'model': 'claude-opus-5-5-' + effort, 'input': history, 'tools': [tool],
+        body = {'model': model, 'input': history, 'tools': [tool],
                 'tool_choice': choice, 'stream': False, 'store': False}
         request = urllib.request.Request(f'http://127.0.0.1:{port}/v1/responses',
                     data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
@@ -62,8 +65,10 @@ def probe(port=8789, effort='high'):
     return {'effort': effort, 'sdk_outputs': 2, 'namespace_roundtrip': True}
 
 
-def probe_messages(port=8790, effort='high'):
+def probe_messages(port=8790, effort='high', *, model=None):
     """Anthropic Messages round trip: a forced synthetic tool_use, then text built from its tool_result."""
+    model = model or 'claude-opus-5-5-' + effort
+    effort = MODELS[model].effort
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     marker = 'FALLBACK_PROBE_OK_' + secrets.token_hex(8)
     result_marker = 'FALLBACK_RESULT_' + secrets.token_hex(8)
@@ -74,7 +79,7 @@ def probe_messages(port=8790, effort='high'):
                  'After receiving its result, reply with exactly that returned text and nothing else.'}]
 
     def post(choice):
-        body = {'model': 'claude-opus-5-5-' + effort, 'max_tokens': 1024, 'messages': messages, 'tools': [tool],
+        body = {'model': model, 'max_tokens': 1024, 'messages': messages, 'tools': [tool],
                 'tool_choice': choice, 'stream': False}
         request = urllib.request.Request(f'http://127.0.0.1:{port}/v1/messages', data=json.dumps(body).encode(),
                     headers={'Content-Type': 'application/json', 'anthropic-version': '2023-06-01'})
@@ -126,8 +131,10 @@ def quadrant_png(colors, size=64):
             + chunk(b'IEND', b''))
 
 
-def probe_image(port=8789, effort='high', sources=IMAGE_SOURCES):
+def probe_image(port=8789, effort='high', sources=IMAGE_SOURCES, *, model=None):
     """One SDK output per source: the model must read back a random four-color PNG exactly."""
+    model = model or 'claude-opus-5-5-' + effort
+    effort = MODELS[model].effort
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     question = ('Name the colors of the four quadrants of the attached image in the order top-left, top-right, '
                 'bottom-left, bottom-right, using only these words: ' + ', '.join(PALETTE) + '. '
@@ -144,7 +151,7 @@ def probe_image(port=8789, effort='high', sources=IMAGE_SOURCES):
                        {'type': 'function_call', 'call_id': call_id, 'name': 'view_image',
                         'arguments': json.dumps({'path': '/tmp/fallback-probe.png'})},
                        {'type': 'function_call_output', 'call_id': call_id, 'output': [image]}]
-        body = {'model': 'claude-opus-5-5-' + effort, 'input': history, 'tools': [VIEW_IMAGE],
+        body = {'model': model, 'input': history, 'tools': [VIEW_IMAGE],
                 'tool_choice': 'none', 'stream': False, 'store': False}
         request = urllib.request.Request(f'http://127.0.0.1:{port}/v1/responses',
                     data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
@@ -165,7 +172,9 @@ def probe_image(port=8789, effort='high', sources=IMAGE_SOURCES):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8789)
-    parser.add_argument('--effort', choices=('high', 'xhigh', 'max'), default='high')
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument('--effort', choices=EFFORTS, default='high')
+    selection.add_argument('--model', choices=MODELS, help='full variant ID from /v1/models')
     parser.add_argument('--image', action='store_true',
                         help='check image input instead: a random four-color PNG, one SDK output per source')
     parser.add_argument('--image-source', choices=IMAGE_SOURCES + ('both',), default='both')
@@ -175,12 +184,12 @@ def main():
     args = parser.parse_args()
     try:
         if args.messages:
-            print(json.dumps(probe_messages(args.port, args.effort)))
+            print(json.dumps(probe_messages(args.port, args.effort, model=args.model)))
         elif args.image:
             sources = IMAGE_SOURCES if args.image_source == 'both' else (args.image_source,)
-            print(json.dumps(probe_image(args.port, args.effort, sources)))
+            print(json.dumps(probe_image(args.port, args.effort, sources, model=args.model)))
         else:
-            print(json.dumps(probe(args.port, args.effort)))
+            print(json.dumps(probe(args.port, args.effort, model=args.model)))
     except Exception as exc:
         print(str(exc) if isinstance(exc, ProbeFailed) else 'Preflight failed: ' + type(exc).__name__)
         raise SystemExit(1)

@@ -118,6 +118,14 @@ class ReuseTests(unittest.IsolatedAsyncioTestCase):
         response, stats, text = await self.turn(history, **kwargs)
         return history, response, stats, text
 
+    async def test_every_variant_reaches_reuse_sdk_unchanged(self):
+        from test_models import VARIANTS, expected_selection
+        for alias, context, effort, fast in VARIANTS:
+            with self.subTest(model=alias):
+                await self.turn([{"role": "user", "content": "hello"}], body={"model": alias})
+                self.assertEqual(self.sdk.created[-1].options.model,
+                                 expected_selection(context, effort, fast))
+
     async def test_direct_successor_resumes_with_new_input_and_reports_usage(self):
         history, response, _, _ = await self.initial()
         self.assertTrue(self.sdk.created[0].closed)

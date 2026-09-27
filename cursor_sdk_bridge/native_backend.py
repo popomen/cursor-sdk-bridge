@@ -446,9 +446,7 @@ class NativeSDKBackend(SDKBackend):
         from cursor_sdk import AgentOptions, LocalAgentOptions, SDKImage, SendOptions, UserMessage
 
         agent, run, failure = None, None, None
-        selection = {"id": "claude-opus-5-5", "params": [
-            {"id": "context", "value": "1m"}, {"id": "effort", "value": MODELS[session.model]},
-            {"id": "fast", "value": "false"}]}
+        selection = MODELS[session.model].selection()
         scope = session.scope = asyncio.timeout(None)
         try:
             # Bridge discovery has its own timeout. Each public response segment

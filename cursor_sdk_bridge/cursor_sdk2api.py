@@ -35,8 +35,8 @@ NO_RETRY = (("x-should-retry", "false"),)
 def model_list():
     # Codex reads the OpenAI fields; Claude Code gateway model discovery reads the Anthropic ones.
     data = [{"id": model, "object": "model", "created": 0, "owned_by": "cursor", "type": "model",
-             "display_name": f"Opus 5.5 {effort} (Cursor)", "created_at": "2026-09-25T00:00:00Z"}
-            for model, effort in MODELS.items()]
+             "display_name": f"{spec.display_name} (Cursor)", "created_at": "2026-09-25T00:00:00Z"}
+            for model, spec in MODELS.items()]
     return {"object": "list", "data": data, "has_more": False, "first_id": data[0]["id"], "last_id": data[-1]["id"]}
 
 

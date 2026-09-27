@@ -48,6 +48,24 @@ class ClaudeSwitchTests(unittest.TestCase):
     def switch(self, mode):
         return switcher.switch(self.settings, self.state, mode, port=8790)
 
+    def test_catalog_upgrade_preserves_choice_backup_and_context_suffix(self):
+        from test_models import VARIANTS
+        old_models = [f"claude-opus-5-5-{effort}[1m]" for effort in ("high", "xhigh", "max")]
+        with patch.object(switcher, "MODELS", old_models):
+            self.switch("cursor")
+        original_backup = json.loads(self.state.read_text())["original"]
+        for alias, context, effort, fast in VARIANTS:
+            settings = self.load()
+            settings["model"] = alias
+            self.write(settings)
+            self.switch("cursor")
+            self.assertEqual(self.load()["model"], alias + ("[1m]" if context == "1m" else ""))
+            self.assertEqual(self.load()["availableModels"], switcher.MODELS)
+            self.assertEqual(json.loads(self.state.read_text())["original"], original_backup)
+        self.assertEqual(len(self.probes), 1)
+        self.switch("restore")
+        self.assertEqual(self.load(), ORIGINAL)
+
     def test_cursor_installs_local_max_and_restore_keeps_unrelated_edits(self):
         self.assertEqual(self.switch("cursor"), "switched")
         settings = self.load()

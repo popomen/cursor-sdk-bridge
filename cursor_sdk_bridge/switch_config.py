@@ -10,6 +10,8 @@ import tempfile
 import tomllib
 import urllib.request
 
+from cursor_sdk_bridge.models import MODELS
+
 ROOT = Path(__file__).resolve().parent
 MIN_ADAPTER_VERSION = 3
 CATALOG_PATH_UPGRADE = (
@@ -102,7 +104,8 @@ def matches_installed(document, state):
     # Choosing another advertised effort is normal Cursor usage, not an
     # external-provider conflict. The saved OpenAI baseline remains unchanged.
     effort = document.get("model_reasoning_effort")
-    if effort in ("high", "xhigh", "max") and document.get("model") == f"claude-opus-5-5-{effort}":
+    model = MODELS.get(document.get("model"))
+    if model is not None and effort == model.effort:
         for name in ("model", "model_reasoning_effort"):
             actual[name] = state["installed"][name]
     return actual == {name: value for name, value in state["installed"].items() if name in actual}
@@ -180,7 +183,7 @@ def verify_service(port):
                                   f"(adapter_version {MIN_ADAPTER_VERSION}) before switching.")
     with opener.open(f"http://127.0.0.1:{port}/v1/models", timeout=3) as response:
         actual = {item["id"] for item in json.load(response)["data"]}
-    expected = {f"claude-opus-5-5-{effort}" for effort in ("high", "xhigh", "max")}
+    expected = set(MODELS)
     if actual != expected:
         raise ServiceNotReady("Service model catalog mismatch; configuration was not switched.")
 
@@ -205,7 +208,7 @@ def service_report(port):
 def bundled_catalog():
     catalog = ROOT / "assets/models.json"
     models = json.loads(catalog.read_text())["models"]
-    if [m["slug"] for m in models] != [f"claude-opus-5-5-{effort}" for effort in ("high", "xhigh", "max")]:
+    if [m["slug"] for m in models] != list(MODELS):
         raise ValueError("invalid bundled model catalog")
     return catalog
 

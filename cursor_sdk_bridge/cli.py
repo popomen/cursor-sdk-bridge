@@ -58,7 +58,7 @@ def main(argv=None):
         print('\nserve [codex|claude|dashboard] [adapter options]\n'
               'switch codex|claude cursor|restore [switch options]\n'
               'restart codex|claude|dashboard\n'
-              'probe [--messages|--image] [--port PORT] [--effort high|xhigh|max]\n'
+              'probe [--messages|--image] [--port PORT] [--effort EFFORT|--model MODEL_ID]\n'
               'deploy [COMMIT] [--install-only] [--repo PATH]')
         return
     command = parser.parse_args(arguments[:1]).command

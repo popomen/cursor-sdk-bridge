@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from cursor_sdk_bridge.sdk_backend import SDKBackend
+from test_models import VARIANTS, expected_selection
 
 
 class StubClient:
@@ -64,14 +65,14 @@ class BackendTests(unittest.IsolatedAsyncioTestCase):
         await self.backend.close()
         self.temp.cleanup()
 
-    async def test_disables_native_tools_and_maps_all_three_efforts(self):
-        for effort in ("high", "xhigh", "max"):
-            await self.backend.generate("claude-opus-5-5-" + effort, "prompt")
+    async def test_disables_native_tools_and_maps_all_twenty_variants(self):
+        for alias, context, effort, fast in VARIANTS:
+            await self.backend.generate(alias, "prompt")
             options = self.client.options
             self.assertEqual(options.tools, [])
             self.assertEqual(options.disallowed_tools, ["mcp", "task", "shell"])
             self.assertEqual(options.local.setting_sources, [])
-            self.assertIn({"id": "effort", "value": effort}, options.model["params"])
+            self.assertEqual(options.model, expected_selection(context, effort, fast))
 
     async def test_requires_full_done_finished_terminal_and_no_native_tool_events(self):
         for field in ("full", "done", "finished", "native"):

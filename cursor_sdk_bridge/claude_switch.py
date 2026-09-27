@@ -16,11 +16,12 @@ import tempfile
 import urllib.request
 
 from cursor_sdk_bridge.probe_service import ProbeFailed, probe_messages
+from cursor_sdk_bridge.models import MODELS as MODEL_SPECS, claude_model
 
-SERVICE_MODELS = [f"claude-opus-5-5-{effort}" for effort in ("high", "xhigh", "max")]
+SERVICE_MODELS = list(MODEL_SPECS)
 # Claude Code plans a 200k window for claude-* names it does not know; [1m] makes it plan for 1M. It strips
 # the suffix and adds the 1M context beta header before sending, so the adapter still receives SERVICE_MODELS.
-MODELS = [model + "[1m]" for model in SERVICE_MODELS]
+MODELS = [claude_model(model) for model in SERVICE_MODELS]
 MAIN, FAST = MODELS[2], MODELS[0]
 DEFAULT_PORT = 8790
 LOCAL_TOKEN = "cursor-sdk2api-local"
@@ -98,7 +99,7 @@ def with_local_hosts(value):
 def chosen_model(settings):
     model = settings.get("model")
     if model in SERVICE_MODELS:
-        model += "[1m]"
+        model = claude_model(model)
     return model if model in MODELS else MAIN
 
 

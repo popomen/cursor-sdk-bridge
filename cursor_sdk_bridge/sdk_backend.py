@@ -6,10 +6,10 @@ import time
 
 from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete
 from cursor_sdk_bridge.request_log import REQUEST_STATS
-from cursor_sdk_bridge.responses_protocol import MODELS
+from cursor_sdk_bridge.models import EFFORTS, MODELS
 from cursor_sdk_bridge.sdk_support import NATIVE_TOOL_EVENTS, bridge_command, model_identity, snapshot
 
-DEFAULT_TIMEOUTS = {"high": 1200, "xhigh": 1200, "max": 1200}
+DEFAULT_TIMEOUTS = {effort: 1200 for effort in EFFORTS}
 DEFAULT_QUEUE_TIMEOUT = 1200
 USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
 
@@ -18,7 +18,7 @@ class SDKBackend:
     def __init__(self, key_file, workspace, timeout=180, route="proxychains", timeouts=None,
                  queue_timeout=DEFAULT_QUEUE_TIMEOUT):
         self.key_file, self.workspace = Path(key_file), Path(workspace)
-        self.timeouts = dict(timeouts or {effort: timeout for effort in MODELS.values()})
+        self.timeouts = dict(timeouts or {effort: timeout for effort in EFFORTS})
         self.timeout, self.route = max(self.timeouts.values()), route
         self.queue_timeout = queue_timeout
         self.client = self.http = self.process = self.drain = None
@@ -27,7 +27,7 @@ class SDKBackend:
         self.waiting, self.active = 0, None
 
     def deadline(self, model):
-        return self.timeouts[MODELS[model]]
+        return self.timeouts[MODELS[model].effort]
 
     def progress(self):
         # Called from HTTP threads while the loop runs; metadata only.
@@ -155,9 +155,7 @@ class SDKBackend:
     async def _generate(self, model, prompt, images=()):
         from cursor_sdk import AgentOptions, LocalAgentOptions, SDKImage, SendOptions, UserMessage
 
-        selection = {"id": "claude-opus-5-5", "params": [
-            {"id": "context", "value": "1m"}, {"id": "effort", "value": MODELS[model]},
-            {"id": "fast", "value": "false"}]}
+        selection = MODELS[model].selection()
         native = []
 
         def observe(event):

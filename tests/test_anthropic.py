@@ -295,7 +295,7 @@ class MessagesHTTPTests(unittest.TestCase):
             self.assertEqual((model["type"], model["object"], model["owned_by"]), ("model", "model", "cursor"))
             self.assertTrue(model["display_name"] and model["created_at"])
         self.assertEqual((listing["has_more"], listing["first_id"], listing["last_id"]),
-                         (False, "claude-opus-5-5-high", MAX))
+                         (False, next(iter(MODELS)), next(reversed(MODELS))))
         self.assertIn("anthropic_messages", json.loads(self.call("GET", "/health")[1])["capabilities"])
 
 

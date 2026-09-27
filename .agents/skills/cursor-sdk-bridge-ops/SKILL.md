@@ -59,7 +59,7 @@ cursor-sdk-bridge switch claude cursor
 cursor-sdk-bridge switch claude restore
 ```
 
-保留用户已选的 Cursor 档位、`[1m]` 后缀、流空闲时限、关闭非流式回退和受管重试设置。
+保留用户已选的 Cursor 上下文、档位和速度；仅 1m 组合使用 `[1m]` 后缀，300k 组合不加。保留流空闲时限、关闭非流式回退和受管重试设置。
 备份在 `~/.codex/cursor-fallback-state/claude-code.json`；含原 provider 凭据，禁止直接展示。
 
 Codex 切换由用户在独立 SSH 终端执行；先结束远端任务并断开 Desktop 的该远程连接：

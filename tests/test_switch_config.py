@@ -113,6 +113,17 @@ class SwitchTests(unittest.TestCase):
         self.state.write_text(json.dumps(state))
         self.config.write_bytes(after if config_after else before)
 
+    def test_all_variants_can_be_selected_then_restored_without_conflict(self):
+        from test_models import VARIANTS
+        switcher.switch(self.root, "cursor")
+        for alias, context, effort, fast in VARIANTS:
+            self.change_config("model", alias)
+            self.change_config("model_reasoning_effort", effort)
+            self.assertFalse(switcher.status(self.root)["managed_config_conflict"])
+        switcher.switch(self.root, "openai")
+        self.assertEqual(tomllib.loads(self.config.read_text()), restored_config())
+        self.assertEqual(self.auth.read_bytes(), AUTH)
+
     def test_restore_retains_only_cursor_definition_beyond_the_original_settings(self):
         self.change_config("model_catalog_json", "/original/catalog.json")
         self.change_config("web_search", "live")

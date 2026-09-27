@@ -1,0 +1,101 @@
+{
+  "validated_at": "2026-09-27T02:47:48.370498+00:00",
+  "deterministic_tests": {
+    "passed": true,
+    "count": 339
+  },
+  "dashboard_tests_after_limit_display_change": {
+    "passed": true,
+    "count": 27
+  },
+  "live_acceptance": {
+    "model": "claude-opus-5-5-low-300k-fast",
+    "sdk_selection": {
+      "id": "claude-opus-5-5",
+      "params": [
+        {
+          "id": "context",
+          "value": "300k"
+        },
+        {
+          "id": "effort",
+          "value": "low"
+        },
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "sdk_catalog_variants": 20,
+    "all_variants_match_sdk_catalog": true,
+    "passed": true,
+    "probe": {
+      "api": "messages",
+      "effort": "low",
+      "sdk_outputs": 2,
+      "tool_roundtrip": true
+    },
+    "requests": [
+      {
+        "event": "inference",
+        "model": "claude-opus-5-5-low-300k-fast",
+        "reuse_mode": "cold",
+        "outcome": "completed",
+        "duration_s": 19.698
+      },
+      {
+        "event": "inference",
+        "model": "claude-opus-5-5-low-300k-fast",
+        "reuse_mode": "cold",
+        "usage": {
+          "input_tokens": 3405,
+          "output_tokens": 24,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 3401
+        },
+        "outcome": "completed",
+        "duration_s": 19.685
+      }
+    ],
+    "duration_s": 40.15
+  },
+  "codex_appserver_stub": {
+    "mode": "stub",
+    "model": "claude-opus-5-5-low-300k-fast",
+    "passed": true,
+    "account_type": null,
+    "requires_openai_auth": false,
+    "model_catalog_verified": true,
+    "turn_status": "completed",
+    "sdk_generations": 2,
+    "synthetic_tool_calls": 1,
+    "namespace_and_call_id_verified": true,
+    "final_message_verified": true,
+    "appserver_stderr_lines_discarded": 0,
+    "request_shapes": [
+      {
+        "tool_types": {
+          "function": 8,
+          "namespace": 7
+        },
+        "input_types": {
+          "message": 3
+        }
+      },
+      {
+        "tool_types": {
+          "function": 8,
+          "namespace": 7
+        },
+        "input_types": {
+          "message": 3,
+          "function_call": 1,
+          "function_call_output": 1
+        }
+      }
+    ],
+    "auth_bytes_unchanged": true
+  },
+  "scope": "All 20 variants mapped and validated without real inference; live SDK tool roundtrip tested only on low/300k/fast."
+}

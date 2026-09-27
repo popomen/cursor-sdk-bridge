@@ -22,6 +22,7 @@ import threading
 import time
 import uuid
 
+from cursor_sdk_bridge.models import EFFORTS, MODELS
 from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
 from cursor_sdk_bridge.responses_protocol import request_payload, unwrap_fence
 from cursor_sdk_bridge.tool_output import parse_output, strict_json
@@ -234,7 +235,8 @@ def auth_digest():
 
 
 def run(args):
-    model = "claude-opus-5-5-" + args.effort
+    model = args.model or "claude-opus-5-5-" + args.effort
+    effort = MODELS[model].effort
     report = {"mode": "live" if args.live else "stub", "model": model, "passed": False}
     original_auth = auth_digest()
     app = server = service = None
@@ -254,7 +256,7 @@ def run(args):
             server_thread = threading.Thread(target=server.serve_forever, daemon=True)
             server_thread.start()
             settings = {
-                "model_provider": PROVIDER, "model": model, "model_reasoning_effort": args.effort,
+                "model_provider": PROVIDER, "model": model, "model_reasoning_effort": effort,
                 "model_catalog_json": str(ROOT / "assets/models.json"),
                 "features.code_mode": False, "features.code_mode_only": False,
                 "features.code_mode_host": True, "features.enable_request_compression": False,
@@ -273,7 +275,7 @@ def run(args):
             report["requires_openai_auth"] = account.get("requiresOpenaiAuth")
             require(account.get("requiresOpenaiAuth") is False, "provider_requires_openai_auth")
             models = app.call("model/list", {"includeHidden": False})
-            expected = {"claude-opus-5-5-" + effort for effort in ("high", "xhigh", "max")}
+            expected = set(MODELS)
             require({item.get("model") for item in models.get("data", [])} == expected, "model_catalog_mismatch")
             report["model_catalog_verified"] = True
             thread = app.call("thread/start", {"model": model, "modelProvider": PROVIDER, "cwd": str(work),
@@ -284,7 +286,7 @@ def run(args):
             require(thread.get("modelProvider") == PROVIDER and thread["thread"].get("ephemeral") is True,
                     "unexpected_thread_configuration")
             thread_id = thread["thread"]["id"]
-            app.call("turn/start", {"threadId": thread_id, "effort": args.effort, "input": [{"type": "text", "text":
+            app.call("turn/start", {"threadId": thread_id, "effort": effort, "input": [{"type": "text", "text":
                 "Call only probe.ping with an empty object exactly once. Do not call any other tool. "
                 "After receiving its synthetic result, respond with exactly " + FINAL_TEXT + "."}]})
             deadline = time.monotonic() + 2 * (args.timeout + 30) + 30
@@ -351,7 +353,9 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--stub", action="store_true", help="Use a stub SDK (default)")
     mode.add_argument("--live", action="store_true", help="Run exactly two real Cursor SDK generations")
-    parser.add_argument("--effort", choices=("high", "xhigh", "max"), default="high")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--effort", choices=EFFORTS, default="high")
+    selection.add_argument("--model", choices=MODELS)
     parser.add_argument("--key-file", type=Path, default=Path.home() / ".codex/cursor-sdk-api-key")
     parser.add_argument("--timeout", type=float, default=180, help="Deadline per SDK generation, seconds")
     parser.add_argument("--codex", default="codex", help="Codex executable")

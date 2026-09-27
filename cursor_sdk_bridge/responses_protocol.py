@@ -10,8 +10,8 @@ from jsonschema import Draft202012Validator
 from cursor_sdk_bridge.failures import InvalidRequest
 from cursor_sdk_bridge.request_log import REQUEST_STATS
 from cursor_sdk_bridge.tool_output import parse_output, strict_json
+from cursor_sdk_bridge.models import MODELS
 
-MODELS = {f"claude-opus-5-5-{effort}": effort for effort in ("high", "xhigh", "max")}
 REQUEST_MARKER = "\nRequest:\n"
 # Long histories push the leading format rules far from where the model starts writing.
 FORMAT_REMINDER = ("\nEnd of request. Reply with only the bare JSON object described above: "
@@ -185,7 +185,7 @@ def image_parts(item):
 
 def prepare_request(body, previous=None, host="Codex Responses"):
     if not isinstance(body, dict) or body.get("model") not in MODELS:
-        raise InvalidRequest("model must be an Opus 5.5 high, xhigh or max alias", "model")
+        raise InvalidRequest("model must be an advertised Opus 5.5 variant; see /v1/models", "model")
     if not isinstance(body.get("stream", False), bool):
         raise InvalidRequest("stream must be boolean", "stream")
     for option in ("background", "truncation"):
@@ -195,7 +195,7 @@ def prepare_request(body, previous=None, host="Codex Responses"):
     if not isinstance(reasoning, dict):
         raise InvalidRequest("reasoning must be an object", "reasoning")
     effort = reasoning.get("effort")
-    if effort is not None and effort != MODELS[body["model"]]:
+    if effort is not None and effort != MODELS[body["model"]].effort:
         raise InvalidRequest("reasoning.effort must match the model alias", "reasoning.effort")
     tools, routes = normalize_tools(body.get("tools", []))
     choice = normalize_choice(body.get("tool_choice", "auto"), routes)

@@ -17,6 +17,7 @@ from cursor_sdk_bridge.probe_service import PALETTE, ProbeFailed, probe_image
 from cursor_sdk_bridge.request_log import RequestLog
 from cursor_sdk_bridge.responses_protocol import (ATTACHED_IMAGE, IMAGE_NOTE, MAX_IMAGE_BYTES, OMITTED_IMAGE, image_dimension,
                                 image_format, request_payload)
+from cursor_sdk_bridge.models import MODELS
 from cursor_sdk_bridge.sdk_backend import SDKBackend
 from cursor_sdk_bridge.switch_config import ServiceNotReady, service_report, verify_service
 from test_cursor_sdk2api import MODEL, StubSDK
@@ -216,7 +217,7 @@ class CatalogTests(unittest.TestCase):
     def test_all_models_declare_image_input(self):
         models = json.loads(CATALOG.read_text())["models"]
         self.assertEqual({model["slug"]: model["input_modalities"] for model in models},
-                         {f"claude-opus-5-5-{effort}": ["text", "image"] for effort in ("high", "xhigh", "max")})
+                         {model: ["text", "image"] for model in MODELS})
 
 
 class CapturingClient(StubClient):

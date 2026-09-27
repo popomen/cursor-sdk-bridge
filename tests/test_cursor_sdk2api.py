@@ -5,7 +5,7 @@ import threading
 import unittest
 
 from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
-from cursor_sdk_bridge.responses_protocol import request_payload
+from cursor_sdk_bridge.responses_protocol import MODELS, request_payload
 
 MODEL = "claude-opus-5-5-high"
 TOOL = {"type": "function", "name": "lookup", "parameters": {"type": "object", "properties": {
@@ -179,12 +179,12 @@ class ResponsesTests(unittest.TestCase):
                 self.assertEqual(status, 400)
         self.assertFalse(self.sdk.prompts)
 
-    def test_models_only_three_aliases(self):
+    def test_models_advertise_all_variants(self):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port)
         connection.request("GET", "/v1/models")
         response = connection.getresponse()
         self.assertEqual([m["id"] for m in json.load(response)["data"]],
-                         [f"claude-opus-5-5-{e}" for e in ("high", "xhigh", "max")])
+                         list(MODELS))
         connection.close()
 
 
