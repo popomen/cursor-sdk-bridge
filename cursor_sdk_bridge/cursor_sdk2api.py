@@ -31,6 +31,7 @@ KEEPALIVE_SECONDS = 10
 POST_PATHS = ("/v1/responses", "/v1/messages", "/v1/messages/count_tokens")
 # Each Claude Code retry reruns a full SDK inference; by default it retries a 5xx up to 10 times.
 NO_RETRY = (("x-should-retry", "false"),)
+CONTEXTS = tuple(dict.fromkeys(spec.context for spec in MODELS.values()))
 
 
 def model_list():
@@ -43,9 +44,11 @@ def model_list():
 
 class Service:
     def __init__(self, backend, timeout=None, log=None, max_prompt_bytes=MAX_PROMPT_BYTES,
-                 ledger_path=None, ledger_ttl=3600, mode="legacy"):
+                 ledger_path=None, ledger_ttl=3600, mode="legacy", context_prompt_bytes=None):
         self.backend, self.timeout, self.log = backend, timeout, log
         self.max_prompt_bytes = max_prompt_bytes
+        # Bytes per SDK token depend on the client's history, so each instance sets its own window limits.
+        self.context_prompt_bytes = dict(context_prompt_bytes or {})
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self.thread.start()
@@ -66,6 +69,18 @@ class Service:
     def record(self, **fields):
         if self.log is not None:
             self.log.record(**fields)
+
+    def context_limit(self, context):
+        return min(self.max_prompt_bytes, self.context_prompt_bytes.get(context, self.max_prompt_bytes))
+
+    def prompt_limit(self, model):
+        return self.context_limit(MODELS[model].context)
+
+    def abandon(self, history):
+        """Free a paused run whose rejected tool continuation the client will not resend."""
+        abandon = getattr(self.backend, "abandon_continuation", None)
+        if abandon:
+            self.loop.call_soon_threadsafe(abandon, history)
 
     def prepare(self, body):
         previous = None
@@ -271,7 +286,8 @@ class Handler(BaseHTTPRequestHandler):
                              "capabilities": ["namespace_functions", "image_inputs", "structured_text_outputs", "safe_error_paths",
                                               "failure_labels", "data_keepalive", "sdk_progress", "anthropic_messages"] + extra_capabilities,
                              "progress": progress() if progress else None,
-                             "limits": limits() if limits else None})
+                             "limits": limits() if limits else None,
+                             "prompt_limits": {context: self.server.service.context_limit(context) for context in CONTEXTS}})
         else:
             self._error(404, "unknown endpoint")
 
@@ -292,9 +308,11 @@ class Handler(BaseHTTPRequestHandler):
             if length:
                 self.rfile.read(length)
             service = self.server.service
+            # A forced drain closes admission anyway: the operator is dropping unfinished work.
+            force = self.path == "/admin/drain?force=1"
             with service.submit_lock:
                 state = service.lifecycle()
-                busy = path == "/admin/drain" and state["unfinished"] > 0
+                busy = path == "/admin/drain" and state["unfinished"] > 0 and not force
                 # A refused drain must not block tool results needed by an
                 # existing run. Close admission only after proving zero work.
                 if not busy:
@@ -346,8 +364,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(("event: " + kind + "\ndata: " + json.dumps(data, ensure_ascii=False) + "\n\n").encode())
             self.wfile.flush()
 
+        limit = service.prompt_limit(body["model"])
         try:
-            if entry["prompt_bytes"] <= service.max_prompt_bytes:
+            if entry["prompt_bytes"] <= limit:
                 future = service.submit(shell, body, history, prompt, stats, images)
             if streaming:
                 self.send_response(200)
@@ -358,7 +377,8 @@ class Handler(BaseHTTPRequestHandler):
                 started = True
                 emit("response.created", {"response": shell})
                 emit("response.in_progress", {"response": shell})
-            if entry["prompt_bytes"] > service.max_prompt_bytes:
+            if entry["prompt_bytes"] > limit:
+                service.abandon(history)
                 raise PromptTooLarge()
             live = ResponsesLive(emit) if streaming else None
             result, streamed_items = self._wait_inference(future, live,
@@ -422,9 +442,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(("event: " + kind + "\ndata: " + json.dumps(data, ensure_ascii=False) + "\n\n").encode())
             self.wfile.flush()
 
+        limit = service.prompt_limit(body["model"])
         try:
             # Like the Anthropic API, oversized prompts fail with HTTP 400 before any stream starts.
-            if entry["prompt_bytes"] > service.max_prompt_bytes:
+            if entry["prompt_bytes"] > limit:
+                service.abandon(history)
                 raise PromptTooLarge()
             shell = response_shell(body["model"])
             future = service.submit(shell, request, history, prompt, stats, images)
@@ -450,7 +472,7 @@ class Handler(BaseHTTPRequestHandler):
             # The service owns inference; HTTP disconnect never cancels it.
         except Exception as exc:
             outcome = failure_label(exc)
-            status, error = failure_error(outcome, entry["prompt_bytes"], service.max_prompt_bytes)
+            status, error = failure_error(outcome, entry["prompt_bytes"], limit)
             try:
                 if started:
                     emit("error", error)
@@ -498,6 +520,11 @@ def main():
     parser.add_argument("--max-prompt-bytes", type=int,
                         default=int(os.environ.get("CURSOR_FALLBACK_MAX_PROMPT_BYTES", MAX_PROMPT_BYTES)),
                         help="Reject larger prompts as context_length_exceeded (env CURSOR_FALLBACK_MAX_PROMPT_BYTES)")
+    for context in CONTEXTS:
+        variable = "CURSOR_FALLBACK_MAX_PROMPT_BYTES_" + context.upper()
+        parser.add_argument("--max-prompt-bytes-" + context, type=int,
+                            default=int(os.environ[variable]) if os.environ.get(variable) else None,
+                            help=f"Lower limit for {context}-context models (env {variable})")
     parser.add_argument("--log-dir", type=Path, help="Private request metadata log directory (default STATE_DIR/logs)")
     parser.add_argument("--route", choices=("proxychains", "ambient", "direct"), default="proxychains")
     args = parser.parse_args()
@@ -511,6 +538,10 @@ def main():
         parser.error(f"--max-concurrency must be between 1 and {MAX_ADMISSION}")
     if args.max_prompt_bytes <= 0:
         parser.error("--max-prompt-bytes must be positive")
+    context_prompt_bytes = {context: getattr(args, "max_prompt_bytes_" + context) for context in CONTEXTS
+                            if getattr(args, "max_prompt_bytes_" + context) is not None}
+    if any(value <= 0 for value in context_prompt_bytes.values()):
+        parser.error("--max-prompt-bytes-<context> must be positive")
     os.umask(0o077)
     backend_type = SDKBackend
     if args.mode == "reuse":
@@ -525,7 +556,7 @@ def main():
     backend = backend_type(args.key_file, args.state_dir / "workspace", route=args.route, timeouts=timeouts,
                          queue_timeout=args.queue_timeout, max_concurrency=args.max_concurrency, **extra)
     service = Service(backend, log=RequestLog(args.log_dir or args.state_dir / "logs"),
-                      max_prompt_bytes=args.max_prompt_bytes, mode=args.mode,
+                      max_prompt_bytes=args.max_prompt_bytes, context_prompt_bytes=context_prompt_bytes, mode=args.mode,
                       ledger_path=None if args.no_ledger else args.state_dir / "results.sqlite3",
                       ledger_ttl=args.dedup_ttl)
     server = make_server(service, args.port)

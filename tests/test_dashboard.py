@@ -337,7 +337,12 @@ class HelperTests(unittest.TestCase):
                 'running_version': 'old-commit', 'deployed_version': 'new-commit'}
         cases = [(idle, None), ({**idle, 'active': {'model': MAX}}, '有推理'), ({**idle, 'queued': 2}, '2 个请求'),
                  ({**idle, 'connections': 3}, '3 个未结束'), ({'state': 'legacy', 'connections': 0}, '无法确认'),
-                 ({'state': 'legacy', 'connections': None}, '无法确认'), ({'state': 'offline', 'connections': None}, '无法确认')]
+                 ({'state': 'legacy', 'connections': None}, '无法确认'), ({'state': 'offline', 'connections': None}, '无法确认'),
+                 ({**idle, 'runs': [{'model': MAX, 'state': 'awaiting_tool_results', 'idle_s': 312.0}],
+                   'limits': {'pending_timeout': 600}},
+                  '1 个运行在等客户端回传工具结果（最久已等 5 分 12 秒，超过 10 分 00 秒 自动失败）'),
+                 ({**idle, 'runs': [{'model': MAX}, {'model': MAX}, {'model': MAX, 'state': 'awaiting_tool_results'}],
+                   'queued': 1}, '有 2 个推理正在进行，1 个运行在等客户端回传工具结果（最久已等 0.0 秒），1 个请求在排队')]
         for item, expected in cases:
             with self.subTest(item=item):
                 blocker = dashboard.restart_blocker(item)
@@ -445,6 +450,45 @@ class RestartTests(unittest.TestCase):
         self.assertEqual(board.restart('claude')['result'], 'restarted')
         self.assertEqual(actions, ['drain'])
 
+    def test_busy_refusal_names_the_force_option(self):
+        board = self.board((CURRENT, None), connections=1)
+        self.assertIn('cursor-sdk-bridge restart claude --force', board.restart('claude')['message'])
+        self.assertEqual(self.calls, [])
+
+    def test_force_restarts_busy_instance_and_names_dropped_work(self):
+        waiting = {'model': MAX, 'state': 'awaiting_tool_results', 'idle_s': 30.0}
+        busy = {**CURRENT, 'progress': {'queued': 1, 'active': waiting, 'runs': [waiting]}}
+        board = self.board((busy, None), connections=1)
+        board.health_reader = lambda port: (CURRENT, None) if self.calls else (busy, None)
+        actions = []
+        def admin(port, action):
+            actions.append(action)
+            return {'draining': True, 'unfinished': 2}
+        board.admin_client = admin
+        result = board.restart('claude', force=True)
+        self.assertEqual((result['result'], actions, self.calls),
+                         ('restarted', ['force-drain'], ['cursor-sdk-bridge-claude.service']))
+        self.assertIn('1 个运行在等客户端回传工具结果', result['message'])
+        self.assertIn('1 个请求在排队', result['message'])
+
+    def test_force_restarts_an_instance_whose_drain_endpoint_is_gone(self):
+        board = self.board((None, 'URLError'))
+        board.health_reader = lambda port: (CURRENT, None) if self.calls else (None, 'URLError')
+        def admin(port, action):
+            raise RuntimeError('synthetic')
+        board.admin_client = admin
+        result = board.restart('claude', force=True)
+        self.assertEqual((result['result'], self.calls), ('restarted', ['cursor-sdk-bridge-claude.service']))
+        self.assertIn('RuntimeError', result['message'])
+
+    def test_force_still_requires_the_deployed_release(self):
+        board = self.board((CURRENT, None))
+        board.version_reader = lambda: None
+        actions = []
+        board.admin_client = lambda port, action: actions.append(action)
+        self.assertEqual(board.restart('claude', force=True)['result'], 'refused')
+        self.assertEqual((self.calls, actions), ([], []))
+
 
 class HTTPTests(unittest.TestCase):
     def setUp(self):
@@ -550,7 +594,8 @@ class HTTPTests(unittest.TestCase):
         status, _, page = self.get('/restart?instance=claude')
         self.assertEqual(status, 200)
         self.assertNotIn(self.board.token, page)
-        self.assertIn('有推理正在进行，现在不能重启', page)
+        self.assertIn('有推理正在进行，1 个请求在排队，现在不能重启', page)
+        self.assertIn('cursor-sdk-bridge restart claude --force', page)
         self.assertEqual(self.get('/restart?instance=nope')[0], 404)
         self.assertEqual(self.get('/restart?instance=codex', 'evil.example')[0], 403)
 

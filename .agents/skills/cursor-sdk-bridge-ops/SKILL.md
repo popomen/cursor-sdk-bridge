@@ -45,6 +45,7 @@ cursor-sdk-bridge restart dashboard
 - units 从固定提交和独立 venv 启动；部署失败保留旧版本，运行参数和 proxychains 路由见项目文档。
 - 重启前立即核实 active、queued、unfinished/pending 和未结束连接；任一非零或无法核实就等待。
 - CLI 与 dashboard 用 drain 关闭新请求入口，再检查未完成请求与连接；不要直接绕过门禁重启。
+- 拒绝信息分列推理、等工具结果（含已等时长和 `pending_timeout`）与排队请求。`restart <实例> --force` 只在用户确认该实例的客户端都已退出、同意丢弃这些请求后使用；不从该实例服务的任务里执行，也不改用裸 `systemctl`。
 - 客户端断开不等于空闲：推理可能继续运行并落盘；按摘要去重的请求也可能仍在等待原任务。
 - pending 工具等待客户端结果也属于进行中的工作，不得因为界面没有输出而重启。
 - 重启完成须确认预期版本的 `/health` 恢复；失败检查 drain 是否恢复，按文档回退。
@@ -99,7 +100,7 @@ agent 先把部署、预检和命令准备好，再请用户断开并执行；�
 | `native_protocol_error` | 检查原生工具回调和事件转换，按证据定位；不要假装已完成 |
 | `invalid_request` | 本地校验拒绝；查 `request_error` 和未完成工具批次，不当作 SDK 上游错误重试 |
 | `model_mismatch` / `isolation_failed` | 停止新验收请求并排查模型、允许的工具和工作目录隔离 |
-| `context_length_exceeded` / `prompt_too_large` | 请求未进 SDK；压缩历史或开新会话 |
+| `context_length_exceeded` / `prompt_too_large` | 请求未进 SDK；压缩历史或开新会话。Claude 实例 1m 上限 1,900,000 字节、300k 上限 500,000 字节，见 `/health.prompt_limits` |
 | 界面空白或客户端断开 | 看事件、idle_s、pending 和账本状态；不能据此断定推理已停止 |
 
 ## 验收与真实用量

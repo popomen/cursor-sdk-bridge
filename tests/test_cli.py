@@ -22,6 +22,7 @@ class CLITests(unittest.TestCase):
         args = self.invoked(['serve', 'claude', '--mode', 'legacy'], 'cursor_sdk_bridge.cursor_sdk2api.main')
         self.assertEqual(args[:2], ['--port', '8790'])
         self.assertIn('1800', args)
+        self.assertEqual(args[args.index('--max-prompt-bytes-1m') + 1], '1900000')
         self.assertEqual(args[-2:], ['--mode', 'legacy'])
         self.assertEqual(self.invoked(['serve', 'dashboard', '--port', '9891'], 'cursor_sdk_bridge.dashboard.main'),
                          ['--port', '9891'])
@@ -54,7 +55,13 @@ class CLITests(unittest.TestCase):
             with self.assertRaises(SystemExit) as error:
                 cli.main(['restart', 'claude'])
         self.assertEqual(error.exception.code, 1)
-        board.return_value.restart.assert_called_once_with('claude')
+        board.return_value.restart.assert_called_once_with('claude', force=False)
+
+    def test_restart_force_is_passed_to_the_guard(self):
+        with patch('cursor_sdk_bridge.dashboard.Dashboard') as board, contextlib.redirect_stdout(io.StringIO()):
+            board.return_value.restart.return_value = {'result': 'restarted'}
+            cli.main(['restart', 'codex', '--force'])
+        board.return_value.restart.assert_called_once_with('codex', force=True)
 
 
 if __name__ == '__main__':

@@ -209,9 +209,10 @@ def deploy(commit='HEAD', repo='.', root=None, unit_dir=None, bin_dir=None, inst
 
 
 def admin_request(port, action):
-    if action not in ('drain', 'resume'):
+    path = {'drain': 'drain', 'resume': 'resume', 'force-drain': 'drain?force=1'}.get(action)
+    if path is None:
         raise DeploymentError('Unknown administration action')
-    request = urllib.request.Request('http://127.0.0.1:%d/admin/%s' % (port, action), data=b'{}',
+    request = urllib.request.Request('http://127.0.0.1:%d/admin/%s' % (port, path), data=b'{}',
                                      headers={'Content-Type': 'application/json', 'Connection': 'close'}, method='POST')
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:

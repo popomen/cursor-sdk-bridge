@@ -281,6 +281,16 @@ class MessagesHTTPTests(unittest.TestCase):
         self.assertEqual(self.sdk.prompts, [])
         self.assertEqual(self.log_entries(1)[-1]["outcome"], "prompt_too_large")
 
+    def test_context_limit_applies_to_its_window_and_is_reported(self):
+        self.service.context_prompt_bytes = {"1m": 100}
+        status, content = self.call("POST", "/v1/messages", claude_code_body())
+        self.assertEqual(status, 400)
+        self.assertTrue(json.loads(content)["error"]["message"].endswith(f"> {estimate_tokens(100)} maximum"))
+        self.assertEqual(self.sdk.prompts, [])
+        self.assertEqual(self.service.prompt_limit(MAX + "-300k"), self.service.max_prompt_bytes)
+        status, content = self.call("GET", "/health")
+        self.assertEqual(json.loads(content)["prompt_limits"], {"1m": 100, "300k": self.service.max_prompt_bytes})
+
     def test_invalid_requests_use_anthropic_error_shape_without_echo(self):
         status, content = self.call("POST", "/v1/messages", claude_code_body(model="private-model-name"))
         self.assertEqual((status, json.loads(content)["error"]["type"]), (400, "invalid_request_error"))

@@ -44,8 +44,11 @@ def serve(arguments):
     from cursor_sdk_bridge import cursor_sdk2api
     defaults = []
     if instance == 'claude':
+        # Claude Code history averages about 2.1 bytes per SDK token; stop short of each window so tool schemas
+        # and the run's own growth still fit. Codex history has more bytes per token and keeps the global limit.
         defaults = ['--port', '8790', '--state-dir', str(Path.home() / '.codex/cursor-sdk2api-claude'),
-                    '--timeout-max', '1800', '--queue-timeout', '1800']
+                    '--timeout-max', '1800', '--queue-timeout', '1800',
+                    '--max-prompt-bytes-1m', '1900000', '--max-prompt-bytes-300k', '500000']
     return invoke(cursor_sdk2api, defaults + arguments)
 
 
@@ -57,7 +60,7 @@ def main(argv=None):
         parser.print_help()
         print('\nserve [codex|claude|dashboard] [adapter options]\n'
               'switch codex|claude cursor|restore [switch options]\n'
-              'restart codex|claude|dashboard\n'
+              'restart codex|claude|dashboard [--force]\n'
               'probe [--messages|--image] [--port PORT] [--effort EFFORT|--model MODEL_ID]\n'
               'deploy [COMMIT] [--install-only] [--repo PATH]')
         return
@@ -92,13 +95,15 @@ def main(argv=None):
     if command == 'restart':
         restart_parser = argparse.ArgumentParser(prog='cursor-sdk-bridge restart')
         restart_parser.add_argument('instance', choices=deployment.INSTANCES)
+        restart_parser.add_argument('--force', action='store_true',
+                                    help='drop unfinished requests and restart anyway; only once every client has exited')
         selected = restart_parser.parse_args(rest)
         from cursor_sdk_bridge import dashboard
         if selected.instance == 'dashboard':
             error = dashboard.run_restart(deployment.unit_name('dashboard'))
             result = {'instance': 'dashboard', 'result': 'failed' if error else 'restarted', 'message': error}
         else:
-            result = dashboard.Dashboard().restart(selected.instance)
+            result = dashboard.Dashboard().restart(selected.instance, force=selected.force)
         print(json.dumps(result, ensure_ascii=False))
         if result['result'] != 'restarted':
             raise SystemExit(1)

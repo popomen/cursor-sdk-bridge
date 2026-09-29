@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import threading
+import time
 import unittest
 
 from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
@@ -62,6 +63,30 @@ class NativeHttpTests(unittest.TestCase):
         self.assertEqual(len(self.sdk.callback_results), 1)
         self.assertEqual(self.post("/v1/responses", second)[1], result)
         self.assertEqual(len(self.sdk.sent), 1)
+
+    def test_force_drain_closes_admission_despite_pending_work(self):
+        body = {"model": MODEL, "tools": [TOOL], "input": [{"role": "user", "content": "lookup"}]}
+        self.assertEqual(self.post("/v1/responses", body)[0], 200)
+        status, state = self.post("/admin/drain?force=1", {})
+        self.assertEqual((status, state["draining"], state["unfinished"]), (200, True, 1))
+        self.assertTrue(self.service.draining)
+
+    def test_oversized_tool_continuation_frees_its_pending_run(self):
+        body = {"model": MODEL, "tools": [TOOL], "input": [{"role": "user", "content": "lookup"}]}
+        status, first = self.post("/v1/responses", body)
+        self.assertEqual((status, self.backend.pending_count()), (200, 1))
+        call = first["output"][-1]
+        second = {**body, "input": body["input"] + first["output"] + [
+            {"type": "function_call_output", "call_id": call["call_id"], "output": "synthetic result"}]}
+        self.service.context_prompt_bytes = {"1m": 1}
+        status, result = self.post("/v1/responses", second)
+        self.assertEqual((status, result["error"]["code"]), (400, "context_length_exceeded"))
+        for _ in range(200):
+            if self.backend.pending_count() == 0:
+                break
+            time.sleep(0.01)
+        self.assertEqual(self.backend.pending_count(), 0)
+        self.assertTrue(self.sdk.runs[0].cancelled)
 
     def test_messages_tool_id_survives_conversion_and_retry(self):
         body = {"model": MODEL, "tools": [{"name": TOOL["name"], "input_schema": TOOL["parameters"]}],

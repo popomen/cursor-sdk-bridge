@@ -125,14 +125,31 @@ def run_restart(unit):
     return None if done.returncode == 0 else 'systemctl 退出码 %d' % done.returncode
 
 
+def pending_work(item):
+    '''Describe the inference, tool waits and queued requests a restart would drop, or None.'''
+    runs = item.get('runs') or ([item['active']] if item.get('active') else [])
+    waiting = [run for run in runs if run.get('state') == 'awaiting_tool_results']
+    parts = []
+    working = len(runs) - len(waiting)
+    if working:
+        parts.append('有推理正在进行' if working == 1 else '有 %d 个推理正在进行' % working)
+    if waiting:
+        limit = (item.get('limits') or {}).get('pending_timeout')
+        parts.append('%d 个运行在等客户端回传工具结果（最久已等 %s%s）' % (
+            len(waiting), duration(max(run.get('idle_s') or 0 for run in waiting)),
+            '，超过 %s 自动失败' % duration(limit) if limit else ''))
+    if item.get('queued'):
+        parts.append('%s 个请求在排队' % item['queued'])
+    if not parts and item.get('unfinished'):
+        parts.append('%s 个请求或工具仍未完成' % item['unfinished'])
+    return '，'.join(parts) or None
+
+
 def restart_blocker(item):
     '''Why a restart now would cut a request short, or None when the instance looks idle.'''
-    if item.get('active'):
-        return '有推理正在进行'
-    if item.get('queued'):
-        return '%s 个请求在排队' % item['queued']
-    if item.get('unfinished'):
-        return '%s 个请求或工具仍未完成' % item['unfinished']
+    work = pending_work(item)
+    if work:
+        return work
     connections = item.get('connections')
     if connections:
         return '端口上有 %d 个未结束的连接，可能有请求正在进行' % connections
@@ -398,33 +415,42 @@ class Dashboard:
                 'clients': self.clients(), 'recent': recent[:RECENT], 'last_action': self.last_action, 'running_version': version.running_version(),
                 'deployed_version': self.version_reader()}
 
-    def restart(self, name):
-        """Close admission atomically, then require zero work and connections before restarting."""
+    def restart(self, name, force=False):
+        """Close admission atomically, then require zero work and connections before restarting.
+
+        force closes admission regardless and drops unfinished work; it also restarts an instance that no
+        longer answers. It still needs the deployed release to verify the new process."""
         spec = self.spec(name)
         if spec is None:
             return None
         if not self.restart_lock.acquire(blocking=False):
             return self.record(spec, 'refused', '另一个重启还没结束，稍后再试。')
-        drained, restarted = False, False
+        drained, restarted, note = False, False, ''
         try:
             item = self.inspect(spec)
-            blocker = item['restart_blocker']
-            if blocker:
-                return self.record(spec, 'refused', '%s，没有重启 %s。等请求结束后再试。' % (blocker, spec['unit']))
-            expected_version = item['deployed_version']
+            blocker, expected_version = item['restart_blocker'], item['deployed_version']
+            if force and not expected_version:
+                return self.record(spec, 'refused', '无法确认已部署版本，没有重启 %s。' % spec['unit'])
+            if blocker and not force:
+                return self.record(spec, 'refused', '%s，没有重启 %s。等请求结束后再试；确认客户端都已退出时，可以用 '
+                                   'cursor-sdk-bridge restart %s --force 强制重启并丢弃这些请求。'
+                                   % (blocker, spec['unit'], spec['name']))
             try:
                 # Mark before sending: a lost response may still have closed admission.
                 drained = True
-                state = self.admin_client(spec['port'], 'drain')
-                if (state.get('draining') is not True or type(state.get('unfinished')) is not int
-                        or state['unfinished'] != 0):
-                    return self.record(spec, 'refused', '实例仍有未完成请求或无法确认已停止接收新请求。')
-                # admin_request has consumed and closed its HTTP connection before this check.
-                connections = self.connection_counter(spec['port'])
-                if connections is None or connections != 0:
-                    return self.record(spec, 'refused', '端口仍有未结束连接或连接状态未知，没有重启。')
+                state = self.admin_client(spec['port'], 'force-drain' if force else 'drain')
+                if not force:
+                    if (state.get('draining') is not True or type(state.get('unfinished')) is not int
+                            or state['unfinished'] != 0):
+                        return self.record(spec, 'refused', '实例仍有未完成请求或无法确认已停止接收新请求。')
+                    # admin_request has consumed and closed its HTTP connection before this check.
+                    connections = self.connection_counter(spec['port'])
+                    if connections is None or connections != 0:
+                        return self.record(spec, 'refused', '端口仍有未结束连接或连接状态未知，没有重启。')
             except Exception as exc:
-                return self.record(spec, 'refused', '无法安全暂停接收新请求（%s），没有重启。' % type(exc).__name__)
+                if not force:
+                    return self.record(spec, 'refused', '无法安全暂停接收新请求（%s），没有重启。' % type(exc).__name__)
+                note = '暂停接收新请求失败（%s），已直接重启。' % type(exc).__name__
             error = self.restart_runner(spec['unit'])
             if error:
                 return self.record(spec, 'failed', '重启 %s 失败（%s）。' % (spec['unit'], error))
@@ -439,6 +465,10 @@ class Dashboard:
                                        'status %s 检查。' % (spec['unit'], self.ready_wait_s, spec['unit']))
                 time.sleep(0.2)
             restarted = True
+            if force:
+                dropped = pending_work(item)
+                return self.record(spec, 'restarted', '已强制重启 %s，/health 已恢复。%s%s' % (
+                    spec['unit'], note, '重启前：%s。这些请求已被丢弃。' % dropped if dropped else ''))
             return self.record(spec, 'restarted', '已重启 %s，/health 已恢复。' % spec['unit'])
         finally:
             if drained and not restarted:
@@ -570,8 +600,8 @@ def render(snapshot):
 def render_confirm(item, token):
     blocker = item['restart_blocker']
     if blocker:
-        action = ('<p class=warn>%s，现在不能重启。等请求结束后刷新本页再确认；确需中断时在终端执行 '
-                  'systemctl --user restart %s。</p>' % (esc(blocker), esc(item['unit_name'])))
+        action = ('<p class=warn>%s，现在不能重启。等请求结束后刷新本页再确认；确认客户端都已退出、可以丢弃这些请求时，'
+                  '在终端执行 cursor-sdk-bridge restart %s --force。</p>' % (esc(blocker), esc(item['name'])))
     else:
         action = ('''<form method=post action=/restart><input type=hidden name=token value='%s'>'''
                   '''<input type=hidden name=instance value='%s'>'''

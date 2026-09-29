@@ -17,7 +17,7 @@ import uuid
 
 from jsonschema import Draft202012Validator
 
-from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, UpstreamIncomplete
+from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, PromptTooLarge, UpstreamIncomplete
 from cursor_sdk_bridge.request_log import REQUEST_STATS
 from cursor_sdk_bridge.responses_protocol import (
     ATTACHED_IMAGE, IMAGE_NOTE, MAX_ATTACHED_IMAGES, MODELS, OMITTED_IMAGE,
@@ -440,6 +440,15 @@ class NativeSDKBackend(SDKBackend):
             session.error = UpstreamIncomplete()
             if session.task and not session.task.done():
                 session.task.cancel()
+
+    def abandon_continuation(self, history):
+        try:
+            session = self._continuation_session(_clean(history))
+        except InvalidRequest:
+            return
+        if session is not None and session.task and not session.task.done() and not session.task.cancelling():
+            session.error = PromptTooLarge()
+            session.task.cancel()
 
     async def _drive(self, session, parent, new_history):
         from cursor_sdk import AgentOptions, LocalAgentOptions, SDKImage, SendOptions, UserMessage

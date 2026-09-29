@@ -1,0 +1,75 @@
+{
+  "recorded_at": "2026-09-29T23:47:25+08:00",
+  "scope": "Metadata only: request-log fields, Claude Code session counts and SDK transcript send counts. No prompts, outputs, tool results or credentials.",
+  "symptom": "A Claude Code session on claude-opus-5-5-max[1m] repeatedly showed 'API Error: Server error mid-response'.",
+  "failures": [
+    {
+      "logged_at": "2026-09-29T20:32:00+08:00",
+      "outcome": "deadline_expired",
+      "duration_s": 1801.8,
+      "prompt_bytes": 2107886,
+      "input_items": 892,
+      "sdk_prompt_sends": 4
+    },
+    {
+      "logged_at": "2026-09-29T21:18:00+08:00",
+      "outcome": "deadline_expired",
+      "duration_s": 1801.3,
+      "prompt_bytes": 2109242,
+      "input_items": 895,
+      "sdk_prompt_sends": 6
+    },
+    {
+      "logged_at": "2026-09-29T22:01:29+08:00",
+      "outcome": "deadline_expired",
+      "duration_s": 1802.9,
+      "prompt_bytes": 2110453,
+      "input_items": 897,
+      "sdk_prompt_sends": 6
+    },
+    {
+      "logged_at": "2026-09-29T23:31:12+08:00",
+      "outcome": "upstream_incomplete",
+      "duration_s": 480,
+      "prompt_bytes": 2122214,
+      "input_items": 900
+    }
+  ],
+  "calibration": {
+    "prompt_bytes": 2054299,
+    "sdk_input_tokens": 963955,
+    "bytes_per_token": 2.13,
+    "duration_s": 114,
+    "note": "Completed text-only request on the same instance near the failures."
+  },
+  "claude_code_session": {
+    "assistant_messages": 325,
+    "with_nonzero_usage": 4,
+    "compactions": 0
+  },
+  "claude_1m_over_1900000_bytes": {
+    "completed": 32,
+    "completed_with_zero_send_chars_median": true,
+    "failed": 4,
+    "first_logged_at": "2026-09-29T18:36:35+08:00",
+    "note": "Completions were mostly tool-result continuations of paused runs; every failure sent the full prompt cold."
+  },
+  "completed_prompt_bytes": {
+    "codex_300k_p90": 703910,
+    "codex_300k_max": 999931,
+    "codex_1m_max": 1510705,
+    "claude_1m_p99": 2054299,
+    "claude_1m_max": 2106476,
+    "claude_300k_max": 123314
+  },
+  "diagnosis": "At about 990k SDK tokens each cold run overflowed the 1M window after the roughly 81k-character tool-schema lookup, re-sent the prompt 4-6 times and hit the 1800 s deadline. Native tool-use responses report zero usage and the 3 MiB guard never fired, so Claude Code never compacted.",
+  "change": {
+    "claude_instance_prompt_limits": {
+      "1m": 1900000,
+      "300k": 500000
+    },
+    "codex_instance": "unchanged global 3 MiB; its history has more bytes per token",
+    "rejected_continuation": "cancels the paused run it would have resumed",
+    "restart": "refusals list inference, tool waits and queued requests; --force drops them"
+  }
+}
