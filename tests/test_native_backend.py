@@ -95,6 +95,7 @@ class FakeSdk:
         self.full, self.wrong_model, self.resume_error, self.send_error = True, False, False, False
         self.auth_error, self.auth_invalid, self.auth_probes = False, False, 0
         self.close_gate, self.close_started = None, asyncio.Event()
+        self.aclosed = 0
 
     async def create(self, options):
         if self.auth_error:
@@ -112,7 +113,7 @@ class FakeSdk:
         return FakeAgent(self, agent_id, options)
 
     async def aclose(self):
-        pass
+        self.aclosed += 1
 
     async def me(self, **kwargs):
         self.auth_probes += 1
@@ -136,6 +137,7 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         async def start_fake():
             if self.backend.client is None:
                 self.backend.client = self.sdk
+            return self.backend.client
         self.backend._start = start_fake
 
     async def asyncTearDown(self):
@@ -274,7 +276,7 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("replayed_tools", stats)
         self.backend.discard_response(text.reuse_token)
 
-    async def test_pending_expiry_releases_lock_and_late_result_recovers_cold(self):
+    async def test_pending_expiry_releases_slot_and_late_result_recovers_cold(self):
         self.backend.pending_timeout = 0.03
         self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "expired")],
                             [("tools", [("lookup", {"key": "a"})]), ("text", "recovered")]]
@@ -283,7 +285,8 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         call = first["output"][0]
         await self.idle()
         self.assertTrue(self.sdk.runs[0].cancelled)
-        self.assertFalse(self.backend.lock.locked())
+        self.assertEqual(self.backend.running, {})
+        self.assertEqual(self.backend.slots._value, self.backend.max_concurrency)
         history += first["output"] + [{"type": "function_call_output", "call_id": call["call_id"], "output": "saved"}]
         self.backend.client = self.sdk
         final, stats, _ = await self.turn(history, tools=[TOOL])
@@ -308,7 +311,7 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
     async def test_expired_result_waits_for_old_cleanup_then_recovers(self):
         self.backend.pending_timeout = 0.03
         self.sdk.close_gate = asyncio.Event()
-        async def hold_before_cleanup(error):
+        async def hold_before_cleanup(error, client=None):
             self.sdk.close_started.set()
             await self.sdk.close_gate.wait()
         self.backend._probe_auth_failure = hold_before_cleanup
@@ -509,13 +512,64 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.backend._by_call)
         self.assertIsNone(self.backend.client)
 
+    async def test_concurrent_runs_await_tools_independently_and_queue_beyond_limit(self):
+        self.backend.max_concurrency, self.backend.slots = 2, asyncio.Semaphore(2)
+        self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "one")],
+                            [("tools", [("lookup", {"key": "b"})]), ("text", "two")],
+                            [("text", "three")]]
+        histories = [[{"role": "user", "content": "first"}], [{"role": "user", "content": "second"}]]
+        firsts = await asyncio.gather(*(self.turn(history, tools=[TOOL]) for history in histories))
+        report = self.backend.progress()
+        self.assertEqual(len(report["runs"]), 2)
+        self.assertEqual({run["state"] for run in report["runs"]}, {"awaiting_tool_results"})
+        self.assertEqual(report["pending_tools"], 2)
+        third = asyncio.create_task(self.turn([{"role": "user", "content": "third"}]))
+        await asyncio.sleep(0.02)
+        self.assertEqual(self.backend.progress()["queued"], 1)
+        self.assertFalse(third.done())
+        finals = []
+        for history, (first, _, _) in zip(histories, firsts):
+            history += first["output"] + [{"type": "function_call_output",
+                "call_id": first["output"][0]["call_id"], "output": "result"}]
+            final, _, _ = await self.turn(history, tools=[TOOL])
+            finals.append(final["output"][0]["content"][0]["text"])
+        self.assertEqual(sorted(finals), ["one", "two"])
+        response, stats, _ = await asyncio.wait_for(third, 1)
+        self.assertEqual(response["output"][0]["content"][0]["text"], "three")
+        self.assertGreater(stats["queue_s"], 0)
+        await self.idle()
+        self.assertEqual(self.backend.running, {})
+        self.assertEqual(self.backend.slots._value, 2)
+
+    async def test_failed_run_retires_shared_bridge_after_other_runs_finish(self):
+        gate = asyncio.Event()
+        self.sdk.scripts = [[("wait", gate), ("text", "survivor")], [("error", None)]]
+        survivor = asyncio.create_task(self.turn([{"role": "user", "content": "long"}]))
+        for _ in range(100):
+            if self.sdk.runs:
+                break
+            await asyncio.sleep(0.005)
+        with self.assertRaises(RuntimeError):
+            await self.turn([{"role": "user", "content": "fails"}])
+        self.assertFalse(survivor.done())
+        self.assertFalse(self.sdk.runs[0].cancelled)
+        self.assertIsNone(self.backend.client)
+        self.assertEqual(self.sdk.aclosed, 0)
+        gate.set()
+        response, _, _ = await asyncio.wait_for(survivor, 1)
+        self.assertEqual(response["output"][0]["content"][0]["text"], "survivor")
+        await self.idle()
+        self.assertEqual(self.sdk.aclosed, 1)
+        self.assertEqual(self.backend.retiring, [])
+
     async def test_deadline_cancels_run_and_releases_queue(self):
         self.backend.timeouts = {"high": 0.02, "xhigh": 0.02, "max": 0.02}
         self.sdk.scripts = [[("sleep", 1), ("text", "unused")]]
         with self.assertRaises(DeadlineExpired):
             await self.turn([{"role": "user", "content": "timeout"}])
         self.assertTrue(self.sdk.runs[0].cancelled)
-        self.assertFalse(self.backend.lock.locked())
+        self.assertEqual(self.backend.running, {})
+        self.assertEqual(self.backend.slots._value, self.backend.max_concurrency)
         self.assertEqual(self.sdk.auth_probes, 0)
 
     async def test_each_tool_response_gets_a_fresh_inference_deadline(self):
@@ -544,6 +598,7 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         self.backend.timeouts = {effort: 0.05 for effort in ("high", "xhigh", "max")}
         async def slow_start():
             await asyncio.sleep(0.08)
+            return self.sdk
         self.backend._start = slow_start
         self.sdk.scripts = [[("text", "ready after bridge startup")]]
         response, _, _ = await self.turn([{"role": "user", "content": "startup"}])
@@ -561,7 +616,8 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(DeadlineExpired):
             await self.turn(history, tools=[TOOL])
         self.assertTrue(self.sdk.runs[0].cancelled)
-        self.assertFalse(self.backend.lock.locked())
+        self.assertEqual(self.backend.running, {})
+        self.assertEqual(self.backend.slots._value, self.backend.max_concurrency)
 
     async def test_waiting_tool_has_pending_timeout_with_inference_clock_stopped(self):
         self.backend.timeouts = {effort: 0.2 for effort in ("high", "xhigh", "max")}

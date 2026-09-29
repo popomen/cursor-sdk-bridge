@@ -21,7 +21,7 @@ from cursor_sdk_bridge.responses_protocol import (
     OMITTED_IMAGE, REQUEST_MARKER, decode_image, image_parts, normalize_choice,
     normalize_tools, qualified_name,
 )
-from cursor_sdk_bridge.sdk_backend import SDKBackend, USAGE_FIELDS
+from cursor_sdk_bridge.sdk_backend import _RUN, SDKBackend, USAGE_FIELDS
 from cursor_sdk_bridge.sdk_support import NATIVE_TOOL_EVENTS, model_identity, snapshot
 
 
@@ -223,10 +223,10 @@ class ReuseSDKBackend(SDKBackend):
         options = AgentOptions(api_key=self.key, model=selection, tools=[],
             disallowed_tools=["mcp", "task", "shell"],
             local=LocalAgentOptions(cwd=str(self.workspace), setting_sources=[], store={"type": "sqlite"}))
-        native = []
+        native, record = [], _RUN.get()
 
         def observe(event):
-            self._touch()
+            self._touch(record)
             kind = event.get("type") if isinstance(event, dict) else getattr(event, "type", None)
             if kind in NATIVE_TOOL_EVENTS:
                 native.append(kind)
@@ -239,7 +239,7 @@ class ReuseSDKBackend(SDKBackend):
         try:
             if parent is not None:
                 try:
-                    agent = await self.client.agents.resume(parent.agent_id, options)
+                    agent = await self._client().agents.resume(parent.agent_id, options)
                 except Exception:
                     # No send has occurred, so rebuilding here cannot duplicate
                     # inference or host tools. Never retry an ambiguous send.
@@ -247,7 +247,7 @@ class ReuseSDKBackend(SDKBackend):
                 else:
                     prompt, images, reason = next_prompt, next_images, "direct_successor"
             if agent is None:
-                agent = await self.client.agents.create(options)
+                agent = await self._client().agents.create(options)
             stats = REQUEST_STATS.get()
             if stats is not None:
                 stats.update(reuse_mode="resume" if parent else "cold", reuse_reason=reason, send_chars=len(prompt))
@@ -257,7 +257,7 @@ class ReuseSDKBackend(SDKBackend):
             run = await agent.send(message, SendOptions(on_delta=observe, on_step=observe))
             full = done = False
             async for event in run.events():
-                self._touch()
+                self._touch(record)
                 full |= bool(event.result_is_full)
                 done |= event.kind == "done"
             result = await run.wait()

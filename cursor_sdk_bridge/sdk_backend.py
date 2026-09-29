@@ -1,6 +1,7 @@
-"""One owned native bridge; independent agents in a shared empty workspace."""
+"""One shared native bridge; concurrent independent agents in a shared empty workspace."""
 import asyncio
 import contextlib
+import contextvars
 from pathlib import Path
 import time
 
@@ -11,84 +12,145 @@ from cursor_sdk_bridge.sdk_support import NATIVE_TOOL_EVENTS, bridge_command, mo
 
 DEFAULT_TIMEOUTS = {effort: 1200 for effort in EFFORTS}
 DEFAULT_QUEUE_TIMEOUT = 1200
+DEFAULT_MAX_CONCURRENCY = 3
 USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
+_RUN = contextvars.ContextVar("sdk_run", default=None)
 
 
 class SDKBackend:
     def __init__(self, key_file, workspace, timeout=180, route="proxychains", timeouts=None,
-                 queue_timeout=DEFAULT_QUEUE_TIMEOUT):
+                 queue_timeout=DEFAULT_QUEUE_TIMEOUT, max_concurrency=DEFAULT_MAX_CONCURRENCY):
         self.key_file, self.workspace = Path(key_file), Path(workspace)
         self.timeouts = dict(timeouts or {effort: timeout for effort in EFFORTS})
         self.timeout, self.route = max(self.timeouts.values()), route
-        self.queue_timeout = queue_timeout
+        self.queue_timeout, self.max_concurrency = queue_timeout, max_concurrency
         self.client = self.http = self.process = self.drain = None
         self.launches = 0
-        self.lock = asyncio.Lock()
-        self.waiting, self.active = 0, None
+        self.slots = asyncio.Semaphore(max_concurrency)
+        self.starting = asyncio.Lock()
+        # Runs share one bridge. A failed run retires its bridge from new
+        # admissions; the process closes once no remaining run still uses it.
+        self.waiting, self.running, self.retiring = 0, {}, []
 
     def deadline(self, model):
         return self.timeouts[MODELS[model].effort]
 
+    def _view(self, record, now):
+        return {"model": record["model"], "running_s": round(now - record["started"], 1),
+                "events": record["events"], "idle_s": round(now - record["last"], 1),
+                "deadline_s": self.deadline(record["model"])}
+
     def progress(self):
         # Called from HTTP threads while the loop runs; metadata only.
-        active, now = self.active, time.monotonic()
-        report = {"queued": self.waiting, "active": None}
-        if active is not None:
-            report["active"] = {"model": active["model"], "running_s": round(now - active["started"], 1),
-                                "events": active["events"], "idle_s": round(now - active["last"], 1),
-                                "deadline_s": self.deadline(active["model"])}
-        return report
+        now = time.monotonic()
+        runs = [self._view(record, now) for record in
+                sorted(list(self.running.values()), key=lambda record: record["started"])]
+        return {"queued": self.waiting, "active": runs[0] if runs else None, "runs": runs}
 
     def limits(self):
-        return {"deadlines": dict(self.timeouts), "queue_timeout": self.queue_timeout}
+        return {"deadlines": dict(self.timeouts), "queue_timeout": self.queue_timeout,
+                "max_concurrency": self.max_concurrency}
 
-    def _touch(self):
-        active = self.active
-        if active is not None:
-            active["events"] += 1
-            active["last"] = time.monotonic()
+    def _touch(self, record):
+        if record is not None:
+            record["events"] += 1
+            record["last"] = time.monotonic()
+
+    def _client(self):
+        record = _RUN.get()
+        return record["client"] if record is not None and record["client"] is not None else self.client
+
+    async def _admit(self, model):
+        # Queue wait and inference have separate bounds: waiting behind other
+        # requests must not consume this request's inference deadline.
+        queue = asyncio.timeout(self.queue_timeout)
+        self.waiting += 1
+        try:
+            async with queue:
+                await self.slots.acquire()
+        except TimeoutError:
+            if queue.expired():
+                raise QueueTimeout() from None
+            raise
+        finally:
+            self.waiting -= 1
+        now = time.monotonic()
+        record = {"model": model, "started": now, "last": now, "events": 0, "client": None}
+        self.running[id(record)] = record
+        return record
+
+    async def _release(self, record):
+        self.running.pop(id(record), None)
+        self.slots.release()
+        await self._reap()
+
+    def _detach(self):
+        handle = (self.client, self.process, self.http, self.drain)
+        self.client = self.process = self.http = self.drain = None
+        return handle
+
+    def _retire(self, client):
+        # A failed send can have no run handle while upstream work has started.
+        # Stop routing new runs to that bridge; _reap closes it when idle.
+        if client is not None and client is self.client:
+            self.retiring.append(self._detach())
+
+    async def _reap(self):
+        used = {id(record["client"]) for record in self.running.values()}
+        idle = [handle for handle in self.retiring if id(handle[0]) not in used]
+        self.retiring = [handle for handle in self.retiring if id(handle[0]) in used]
+        for handle in idle:
+            await self._close_bridge(*handle)
 
     async def _start(self):
         from cursor_sdk import AsyncCursorClient, DefaultAsyncHttpxClient
 
-        if self.client is not None:
-            return
-        self.workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
-            private = (not self.key_file.is_symlink() and self.key_file.is_file()
-                       and not self.key_file.stat().st_mode & 0o077)
-            self.key = self.key_file.read_text().strip() if private else ""
-        except OSError:
-            self.key = ""
-        if not self.key:
-            raise KeyInvalid()
-        self.http = DefaultAsyncHttpxClient(trust_env=False)
-        launch = asyncio.create_task(AsyncCursorClient.launch_bridge(
-                command=bridge_command(self.route, "http1"), workspace=self.workspace,
-                timeout=15, client_timeout=self.timeout, max_retries=0,
-                http_client=self.http, allow_api_key_env_fallback=False,
-            ))
-        try:
-            # SDK launch does not clean up on CancelledError. Shield discovery,
-            # retain its bounded task, then own/close any resulting process.
-            self.client = await asyncio.shield(launch)
-            self.process = self.client._owned_bridge.process
-            self.drain = asyncio.create_task(self._discard_stderr())
-            self.launches += 1
-        except BaseException:
-            with contextlib.suppress(Exception):
-                self.client = await launch
-                self.process = self.client._owned_bridge.process
-            await self.close()
-            raise
+        async with self.starting:
+            if self.client is not None:
+                if self.process is None or self.process.returncode is None:
+                    return self.client
+                self.retiring.append(self._detach())
+            self.workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
+            try:
+                private = (not self.key_file.is_symlink() and self.key_file.is_file()
+                           and not self.key_file.stat().st_mode & 0o077)
+                self.key = self.key_file.read_text().strip() if private else ""
+            except OSError:
+                self.key = ""
+            if not self.key:
+                raise KeyInvalid()
+            http = DefaultAsyncHttpxClient(trust_env=False)
+            launch = asyncio.create_task(AsyncCursorClient.launch_bridge(
+                    command=bridge_command(self.route, "http1"), workspace=self.workspace,
+                    timeout=15, client_timeout=self.timeout, max_retries=0,
+                    http_client=http, allow_api_key_env_fallback=False,
+                ))
+            client = process = None
+            try:
+                # SDK launch does not clean up on CancelledError. Shield discovery,
+                # retain its bounded task, then own/close any resulting process.
+                client = await asyncio.shield(launch)
+                process = client._owned_bridge.process
+                self.client, self.process, self.http = client, process, http
+                self.drain = asyncio.create_task(self._discard_stderr(process))
+                self.launches += 1
+                return client
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    client = await launch
+                    process = client._owned_bridge.process
+                if client is self.client:
+                    self._detach()
+                await self._close_bridge(client, process, http, None)
+                raise
 
-    async def _discard_stderr(self):
-        stream = self.process.stderr
+    async def _discard_stderr(self, process):
+        stream = process.stderr
         if stream:
             while await stream.read(65536):
                 pass
 
-    async def _probe_auth_failure(self, error):
+    async def _probe_auth_failure(self, error, client=None):
         """Classify a denied request using a free, read-only key check first.
 
         Never retry the inference. A valid key may still lack a model/region
@@ -98,12 +160,13 @@ class SDKBackend:
         code = getattr(error, "code", None)
         if status not in (401, 403) and code not in ("unauthenticated", "permission_denied"):
             return
-        if self.client is None:
+        client = client or self.client
+        if client is None:
             return
         stats = REQUEST_STATS.get()
         verdict = "unknown"
         try:
-            await asyncio.wait_for(self.client.me(api_key=self.key), 10)
+            await asyncio.wait_for(client.me(api_key=self.key), 10)
             verdict = "valid"
         except Exception as probe_error:
             if getattr(probe_error, "status_code", None) == 401 or getattr(probe_error, "code", None) == "unauthenticated":
@@ -114,52 +177,39 @@ class SDKBackend:
             raise KeyInvalid() from None
 
     async def generate(self, model, prompt, images=()):
-        # Queue wait and inference have separate bounds: waiting behind another
-        # request must not consume this request's inference deadline. Never
-        # replay an ambiguous failed send.
+        # Never replay an ambiguous failed send.
         waited = time.monotonic()
-        queue = asyncio.timeout(self.queue_timeout)
-        self.waiting += 1
+        record = await self._admit(model)
+        context = _RUN.set(record)
         try:
-            async with queue:
-                await self.lock.acquire()
-        except TimeoutError:
-            if queue.expired():
-                raise QueueTimeout() from None
-            raise
-        finally:
-            self.waiting -= 1
-        try:
-            acquired = time.monotonic()
-            self.active = {"model": model, "started": acquired, "last": acquired, "events": 0}
             stats = REQUEST_STATS.get()
             if stats is not None:
-                stats["queue_s"] = round(acquired - waited, 3)
-            await self._start()
+                stats["queue_s"] = round(record["started"] - waited, 3)
+            record["client"] = await self._start()
             scope = asyncio.timeout(self.deadline(model))
             try:
                 async with scope:
                     return await self._generate(model, prompt, images)
             except BaseException as exc:
                 try:
-                    await self._probe_auth_failure(exc)
+                    await self._probe_auth_failure(exc, record["client"])
                 finally:
-                    await self.close()
+                    self._retire(record["client"])
                 if isinstance(exc, TimeoutError) and scope.expired():
                     raise DeadlineExpired() from None
                 raise
         finally:
-            self.active = None
-            self.lock.release()
+            _RUN.reset(context)
+            await self._release(record)
 
     async def _generate(self, model, prompt, images=()):
         from cursor_sdk import AgentOptions, LocalAgentOptions, SDKImage, SendOptions, UserMessage
 
         selection = MODELS[model].selection()
-        native = []
+        native, record = [], _RUN.get()
 
         def observe(event):
-            self._touch()
+            self._touch(record)
             kind = event.get("type") if isinstance(event, dict) else getattr(event, "type", None)
             if kind in NATIVE_TOOL_EVENTS:
                 native.append(kind)
@@ -167,7 +217,7 @@ class SDKBackend:
         before = snapshot(self.workspace)
         agent = run = None
         try:
-            agent = await self.client.agents.create(AgentOptions(
+            agent = await self._client().agents.create(AgentOptions(
                 api_key=self.key, model=selection, tools=[], disallowed_tools=["mcp", "task", "shell"],
                 local=LocalAgentOptions(cwd=str(self.workspace), setting_sources=[])))
             message = UserMessage(text=prompt, images=[
@@ -176,7 +226,7 @@ class SDKBackend:
             run = await agent.send(message, SendOptions(on_delta=observe, on_step=observe))
             full = done = False
             async for event in run.events():
-                self._touch()
+                self._touch(record)
                 full |= bool(event.result_is_full)
                 done |= event.kind == "done"
             result = await run.wait()
@@ -191,17 +241,20 @@ class SDKBackend:
                 stats["usage"] = {field: getattr(usage, field) for field in USAGE_FIELDS}
             return result.result
         finally:
-            # A cancellation during send may have no run handle; bridge shutdown is
-            # the fallback in generate(). Cleanup never replaces the primary error.
+            # A cancellation during send may have no run handle; bridge retirement
+            # is the fallback in generate(). Cleanup never replaces the primary error.
             for target, method in ((run, "cancel"), (agent, "close")):
                 if target is not None:
                     with contextlib.suppress(Exception, asyncio.CancelledError):
                         await asyncio.wait_for(getattr(target, method)(), 3)
 
     async def close(self):
-        client, process, http, drain = self.client, self.process, self.http, self.drain
+        handles, self.retiring = [self._detach(), *self.retiring], []
+        for handle in handles:
+            await self._close_bridge(*handle)
+
+    async def _close_bridge(self, client, process, http, drain):
         owned = client._owned_bridge if client else None
-        self.client = self.process = self.http = self.drain = None
         if client:
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 await asyncio.wait_for(client.aclose(), 4)

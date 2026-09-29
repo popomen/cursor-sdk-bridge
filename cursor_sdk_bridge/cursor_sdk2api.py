@@ -25,6 +25,7 @@ MAX_BODY = 64 * 1024 * 1024
 MAX_CACHE_BYTES = 256 * 1024 * 1024
 MAX_PROMPT_BYTES = 3 * 1024 * 1024
 MAX_TIMEOUT = 1800
+MAX_ADMISSION = 8
 REQUEST_MARGIN = 30
 KEEPALIVE_SECONDS = 10
 POST_PATHS = ("/v1/responses", "/v1/messages", "/v1/messages/count_tokens")
@@ -49,7 +50,7 @@ class Service:
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self.thread.start()
         self.cache, self.cache_lock = OrderedDict(), threading.Lock()
-        self.admission = threading.BoundedSemaphore(8)
+        self.admission = threading.BoundedSemaphore(MAX_ADMISSION)
         self.submit_lock, self.closing = threading.RLock(), False
         self.draining, self.jobs, self.mode = False, {}, mode
         self.ledger = ResultLedger(ledger_path, ttl=ledger_ttl) if ledger_path else None
@@ -471,7 +472,7 @@ def make_server(service, port=8789):
 
 
 def main():
-    from cursor_sdk_bridge.sdk_backend import DEFAULT_QUEUE_TIMEOUT, DEFAULT_TIMEOUTS, SDKBackend
+    from cursor_sdk_bridge.sdk_backend import DEFAULT_MAX_CONCURRENCY, DEFAULT_QUEUE_TIMEOUT, DEFAULT_TIMEOUTS, SDKBackend
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8789)
@@ -490,6 +491,10 @@ def main():
                         default=float(os.environ.get("CURSOR_FALLBACK_QUEUE_TIMEOUT", DEFAULT_QUEUE_TIMEOUT)),
                         help="Maximum wait behind other SDK requests, seconds "
                              f"(env CURSOR_FALLBACK_QUEUE_TIMEOUT, default {DEFAULT_QUEUE_TIMEOUT})")
+    parser.add_argument("--max-concurrency", type=int,
+                        default=int(os.environ.get("CURSOR_FALLBACK_MAX_CONCURRENCY", DEFAULT_MAX_CONCURRENCY)),
+                        help="Concurrent SDK inferences; later requests queue "
+                             f"(env CURSOR_FALLBACK_MAX_CONCURRENCY, default {DEFAULT_MAX_CONCURRENCY})")
     parser.add_argument("--max-prompt-bytes", type=int,
                         default=int(os.environ.get("CURSOR_FALLBACK_MAX_PROMPT_BYTES", MAX_PROMPT_BYTES)),
                         help="Reject larger prompts as context_length_exceeded (env CURSOR_FALLBACK_MAX_PROMPT_BYTES)")
@@ -502,6 +507,8 @@ def main():
         parser.error(f"timeouts must be greater than 0 and at most {MAX_TIMEOUT} seconds")
     if not 0 < args.queue_timeout <= MAX_TIMEOUT:
         parser.error(f"--queue-timeout must be greater than 0 and at most {MAX_TIMEOUT} seconds")
+    if not 0 < args.max_concurrency <= MAX_ADMISSION:
+        parser.error(f"--max-concurrency must be between 1 and {MAX_ADMISSION}")
     if args.max_prompt_bytes <= 0:
         parser.error("--max-prompt-bytes must be positive")
     os.umask(0o077)
@@ -516,7 +523,7 @@ def main():
         parser.error("pending timeout must be positive and at most 1800; dedup TTL must be positive")
     extra = {"pending_timeout": args.pending_timeout} if args.mode == "native" else {}
     backend = backend_type(args.key_file, args.state_dir / "workspace", route=args.route, timeouts=timeouts,
-                         queue_timeout=args.queue_timeout, **extra)
+                         queue_timeout=args.queue_timeout, max_concurrency=args.max_concurrency, **extra)
     service = Service(backend, log=RequestLog(args.log_dir or args.state_dir / "logs"),
                       max_prompt_bytes=args.max_prompt_bytes, mode=args.mode,
                       ledger_path=None if args.no_ledger else args.state_dir / "results.sqlite3",
@@ -525,7 +532,7 @@ def main():
     def stop(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
-    print(f"cursor-sdk2api listening on 127.0.0.1:{server.server_port}; deadlines {timeouts}; queue {args.queue_timeout}", flush=True)
+    print(f"cursor-sdk2api listening on 127.0.0.1:{server.server_port}; deadlines {timeouts}; queue {args.queue_timeout}; concurrency {args.max_concurrency}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

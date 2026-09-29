@@ -295,7 +295,9 @@ def describe(spec, health, error):
     progress = health.get('progress') if isinstance(health.get('progress'), dict) else None
     limits = health.get('limits') if isinstance(health.get('limits'), dict) else None
     active = progress.get('active') if progress and isinstance(progress.get('active'), dict) else None
-    report.update(adapter_version=health.get('adapter_version'), limits=limits, active=active,
+    runs = progress.get('runs') if progress and isinstance(progress.get('runs'), list) else [active] if active else []
+    runs = [run for run in runs if isinstance(run, dict)]
+    report.update(adapter_version=health.get('adapter_version'), limits=limits, active=active, runs=runs,
                   queued=progress.get('queued') if progress else None,
                   unfinished=progress.get('unfinished', health.get('unfinished')) if progress else None,
                   running_version=health.get('running_version'))
@@ -312,17 +314,23 @@ def describe(spec, health, error):
                 seconds(expected['queue_timeout']), spec['name']))
     if progress is None:
         state = 'legacy'
-    elif active is None:
+    elif not runs:
         state = 'idle'
     else:
-        idle, running, deadline = active.get('idle_s') or 0, active.get('running_s') or 0, active.get('deadline_s')
-        state = 'stalled' if idle >= STALL_S else 'running'
-        if state == 'stalled':
-            notes.append('已经 %s 没有新的 SDK 事件，上游可能卡住；到时限会报 deadline_expired。' % duration(idle))
-        if deadline and running >= 0.8 * deadline:
-            notes.append('已运行 %s，接近 %s 的推理时限。' % (duration(running), duration(deadline)))
+        state = 'running'
+        for run in runs:
+            idle, running, deadline = run.get('idle_s') or 0, run.get('running_s') or 0, run.get('deadline_s')
+            label = tier(run.get('model')) + ' ' if len(runs) > 1 else ''
+            # A run awaiting client tool results is waiting on the client, not upstream.
+            if idle >= STALL_S and run.get('state') != 'awaiting_tool_results':
+                state = 'stalled'
+                notes.append('%s已经 %s 没有新的 SDK 事件，上游可能卡住；到时限会报 deadline_expired。' % (label, duration(idle)))
+            if deadline and running >= 0.8 * deadline:
+                notes.append('%s已运行 %s，接近 %s 的推理时限。' % (label, duration(running), duration(deadline)))
     if report['queued']:
-        notes.append('%s 个请求在排队，同一实例的其他会话要等当前推理结束。' % report['queued'])
+        limit = (limits or {}).get('max_concurrency')
+        notes.append('%s 个请求在排队，%s要等已有推理结束才会开始。' % (
+            report['queued'], '并发已满（上限 %s），' % limit if limit else ''))
     return {**report, 'state': state}
 
 
@@ -448,7 +456,8 @@ class Dashboard:
 
 
 def card(item):
-    unit, limits, active = item.get('unit'), item.get('limits'), item.get('active')
+    unit, limits = item.get('unit'), item.get('limits')
+    runs = item.get('runs') or ([item['active']] if item.get('active') else [])
     unit_text = None
     if unit:
         unit_text = '%s/%s，PID %s，自动重启 %s 次，启动于 %s' % tuple(unit.get(field) or '—' for field in UNIT_FIELDS)
@@ -457,11 +466,14 @@ def card(item):
         deadlines = limits.get('deadlines') or {}
         limit_text = ' / '.join('%s %s' % (effort, seconds(value)) for effort, value in deadlines.items())
         limit_text += '，排队上限 %s' % seconds(limits.get('queue_timeout'))
+        if limits.get('max_concurrency'):
+            limit_text += '，并发上限 %s' % limits['max_concurrency']
     active_text = '未知' if item['state'] in ('offline', 'legacy') else '无'
-    if active:
-        active_text = '%s：已运行 %s / 时限 %s，SDK 事件 %s，距上次事件 %s' % (
-            tier(active.get('model')), duration(active.get('running_s')), duration(active.get('deadline_s')),
-            active.get('events'), duration(active.get('idle_s')))
+    if runs:
+        active_text = '；'.join('%s%s：已运行 %s / 时限 %s，SDK 事件 %s，距上次事件 %s' % (
+            tier(run.get('model')), '（等待工具结果）' if run.get('state') == 'awaiting_tool_results' else '',
+            duration(run.get('running_s')), duration(run.get('deadline_s')),
+            run.get('events'), duration(run.get('idle_s'))) for run in runs)
     rows = (('客户端', item['client']), ('地址', '127.0.0.1:%s' % item['port']),
             ('适配器版本', item.get('adapter_version')), ('运行提交', item.get('running_version')),
             ('已部署提交', item.get('deployed_version')), ('需要重启', item.get('needs_restart')),
@@ -565,7 +577,8 @@ def render_confirm(item, token):
                   '''<input type=hidden name=instance value='%s'>'''
                   '''<button type=submit class=danger>确认重启 %s</button></form>''') % (
                       esc(token), esc(item['name']), esc(item['unit_name']))
-    active = '有' if item.get('active') else ('未知' if item['state'] in ('offline', 'legacy') else '无')
+    count = len(item.get('runs') or ([item['active']] if item.get('active') else []))
+    active = '%d 个' % count if count else ('未知' if item['state'] in ('offline', 'legacy') else '无')
     rows = (('状态', STATES[item['state']]), ('当前推理', active), ('排队', item.get('queued')),
             ('未结束连接', item.get('connections')))
     table = ''.join('<tr><th>%s</th><td>%s</td></tr>' % (esc(name), esc(value)) for name, value in rows)

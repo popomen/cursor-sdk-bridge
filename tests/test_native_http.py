@@ -21,6 +21,7 @@ class NativeHttpTests(unittest.TestCase):
         async def start_fake():
             if self.backend.client is None:
                 self.backend.client = self.sdk
+            return self.backend.client
         self.backend._start = start_fake
         self.sdk.scripts = [[("thinking", "synthetic thought"), ("text", "Checking."),
                              ("tools", [("lookup", {"key": "a"})]), ("text", "Done.")]]

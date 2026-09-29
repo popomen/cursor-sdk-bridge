@@ -276,18 +276,15 @@ class ReuseTests(unittest.IsolatedAsyncioTestCase):
         self.backend.timeouts["high"] = 0.01
         with self.assertRaises(DeadlineExpired):
             await self.initial()
-        self.assertFalse(self.backend.lock.locked())
-        self.assertIsNone(self.backend.active)
+        self.assertEqual(self.backend.running, {})
+        self.assertEqual(self.backend.slots._value, self.backend.max_concurrency)
         self.assertEqual(self.backend._completed, {})
 
     async def test_queue_wait_does_not_bypass_parent_timeout(self):
         self.backend.queue_timeout = 0.01
-        await self.backend.lock.acquire()
-        try:
-            with self.assertRaises(QueueTimeout):
-                await self.initial()
-        finally:
-            self.backend.lock.release()
+        self.backend.slots = asyncio.Semaphore(0)
+        with self.assertRaises(QueueTimeout):
+            await self.initial()
         self.assertEqual(self.backend.waiting, 0)
         self.assertEqual(self.sdk.created, [])
 

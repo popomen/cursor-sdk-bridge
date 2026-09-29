@@ -48,6 +48,20 @@ class StubClient:
         self.closed = True
 
 
+class FakeProcess:
+    def __init__(self):
+        self.returncode, self.stderr = None, None
+
+    def terminate(self):
+        self.returncode = -15
+
+    def kill(self):
+        self.returncode = -9
+
+    async def wait(self):
+        return self.returncode
+
+
 class BackendTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -99,6 +113,29 @@ class BackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.client.closed)
         self.assertIsNone(self.backend.client)
 
+
+    async def test_concurrent_requests_share_one_launch_and_relaunch_after_exit(self):
+        self.backend.client, clients = None, []
+        async def launch(**kwargs):
+            await asyncio.sleep(0.02)
+            client = StubClient()
+            client._owned_bridge.process, client.shutdowns = FakeProcess(), 0
+            async def aclose(client=client):
+                client.shutdowns += 1
+            client.aclose = aclose
+            clients.append(client)
+            return client
+        with patch("cursor_sdk.AsyncCursorClient.launch_bridge", side_effect=launch):
+            results = await asyncio.gather(*(self.backend.generate("claude-opus-5-5-high", "prompt")
+                                             for _ in range(3)))
+            self.assertEqual(results, ['{"output":[]}'] * 3)
+            self.assertEqual(len(clients), 1)
+            clients[0]._owned_bridge.process.returncode = 1
+            await self.backend.generate("claude-opus-5-5-high", "prompt")
+        self.assertEqual(len(clients), 2)
+        self.assertEqual([client.shutdowns for client in clients], [1, 0])
+        self.assertIs(self.backend.client, clients[1])
+        self.assertEqual(self.backend.retiring, [])
 
 if __name__ == "__main__":
     unittest.main()

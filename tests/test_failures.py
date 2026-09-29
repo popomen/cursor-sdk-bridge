@@ -257,6 +257,7 @@ class BackendFailureTests(unittest.IsolatedAsyncioTestCase):
             await self.backend.generate("claude-opus-5-5-high", "prompt")
 
     async def test_queue_wait_does_not_consume_inference_deadline(self):
+        self.backend.max_concurrency, self.backend.slots = 1, asyncio.Semaphore(1)
         self.backend.timeouts["high"] = 0.5
         async def slow_events():
             await asyncio.sleep(0.3)
@@ -275,12 +276,9 @@ class BackendFailureTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_queue_timeout_label(self):
         self.backend.queue_timeout = 0.05
-        await self.backend.lock.acquire()
-        try:
-            with self.assertRaises(QueueTimeout):
-                await self.backend.generate("claude-opus-5-5-xhigh", "prompt")
-        finally:
-            self.backend.lock.release()
+        self.backend.slots = asyncio.Semaphore(0)
+        with self.assertRaises(QueueTimeout):
+            await self.backend.generate("claude-opus-5-5-xhigh", "prompt")
 
     async def test_public_key_file_is_key_invalid(self):
         self.backend.client = None

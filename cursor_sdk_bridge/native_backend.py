@@ -17,7 +17,7 @@ import uuid
 
 from jsonschema import Draft202012Validator
 
-from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete
+from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, UpstreamIncomplete
 from cursor_sdk_bridge.request_log import REQUEST_STATS
 from cursor_sdk_bridge.responses_protocol import (
     ATTACHED_IMAGE, IMAGE_NOTE, MAX_ATTACHED_IMAGES, MODELS, OMITTED_IMAGE,
@@ -159,6 +159,7 @@ class _Session:
     settle_task: object = None
     owner_key: str = ""
     error: object = None
+    record: dict = None
     started: float = field(default_factory=time.monotonic)
 
 
@@ -176,13 +177,19 @@ class NativeSDKBackend(SDKBackend):
     def limits(self):
         return {**super().limits(), "pending_timeout": self.pending_timeout}
 
+    def _view(self, record, now):
+        view = super()._view(record, now)
+        session = record.get("session")
+        if session is not None:
+            waiting = any(not call.future.done() for call in list(session.calls.values()))
+            view["state"] = "awaiting_tool_results" if waiting else "running"
+        return view
+
     def progress(self):
         value = super().progress()
         value["pending_tools"] = sum(not call.future.done() for session in list(self._sessions.values())
                                      for call in list(session.calls.values()))
         value["open_runs"] = self.pending_count()
-        if value["active"] is not None:
-            value["active"]["state"] = "awaiting_tool_results" if value["pending_tools"] else "running"
         return value
 
     def _prune(self):
@@ -213,14 +220,7 @@ class NativeSDKBackend(SDKBackend):
             return await self._continue(session, body, history, policy, on_event)
         self._prune()
         queued = time.monotonic()
-        self.waiting += 1
-        try:
-            try:
-                await asyncio.wait_for(self.lock.acquire(), self.queue_timeout)
-            except TimeoutError:
-                raise QueueTimeout() from None
-        finally:
-            self.waiting -= 1
+        record = await self._admit(model)
         try:
             parent, new_history = None, history
             items, ends, _ = _canonical(history)
@@ -230,21 +230,21 @@ class NativeSDKBackend(SDKBackend):
                     break
             stats = REQUEST_STATS.get()
             stats = stats if stats is not None else {}
-            stats.update(engine="native", queue_s=round(time.monotonic() - queued, 3))
+            stats.update(engine="native", queue_s=round(record["started"] - queued, 3))
             session = _Session(model, policy, copy.deepcopy(history), copy.deepcopy(body), on_event, stats,
                                asyncio.get_running_loop().create_future(), recovery=(
                                    _RECOVERY_REBUILD.get() or bool(history)
                                    and history[-1].get("type") == "function_call_output"))
+            session.record, record["session"] = record, session
             self._sessions[id(session)] = session
-            self.active = {"model": model, "started": time.monotonic(), "last": time.monotonic(), "events": 0}
+            # The drive task owns the slot from here and releases it on exit.
             session.task = asyncio.create_task(self._drive(session, parent, new_history))
-            # The drive task always resolves the boundary; consume its exception
-            # so a disconnected HTTP client cannot create an unhandled task.
-            session.task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
         except BaseException:
-            if self.lock.locked():
-                self.lock.release()
+            await self._release(record)
             raise
+        # The drive task always resolves the boundary; consume its exception
+        # so a disconnected HTTP client cannot create an unhandled task.
+        session.task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
         return await asyncio.shield(session.boundary)
 
     async def _continue(self, session, body, history, policy, on_event):
@@ -310,8 +310,7 @@ class NativeSDKBackend(SDKBackend):
             session.scope.reschedule(None)
         else:
             session.scope.reschedule(asyncio.get_running_loop().time() + self.deadline(session.model))
-        if self.active is not None:
-            self.active["started"] = self.active["last"] = time.monotonic()
+        session.record["started"] = session.record["last"] = time.monotonic()
         for public_id, call in calls.items():
             self._by_call.pop(public_id, None)
             call.future.set_result(_tool_result(results[public_id]))
@@ -384,7 +383,7 @@ class NativeSDKBackend(SDKBackend):
             if session.settle_task:
                 session.settle_task.cancel()
             session.settle_task = asyncio.create_task(self._settle(session, session.generation))
-        self._touch()
+        self._touch(session.record)
         try:
             return await asyncio.wait_for(future, self.pending_timeout)
         except TimeoutError:
@@ -445,15 +444,14 @@ class NativeSDKBackend(SDKBackend):
     async def _drive(self, session, parent, new_history):
         from cursor_sdk import AgentOptions, LocalAgentOptions, SDKImage, SendOptions, UserMessage
 
-        agent, run, failure = None, None, None
+        agent, run, failure, client = None, None, None, None
         selection = MODELS[session.model].selection()
         scope = session.scope = asyncio.timeout(None)
         try:
             # Bridge discovery has its own timeout. Each public response segment
             # receives a fresh inference allowance after the bridge is ready.
-            await self._start()
-            if self.active is not None:
-                self.active["started"] = self.active["last"] = time.monotonic()
+            client = session.record["client"] = await self._start()
+            session.record["started"] = session.record["last"] = time.monotonic()
             async with scope:
                 scope.reschedule(asyncio.get_running_loop().time() + self.deadline(session.model))
                 before = snapshot(self.workspace)
@@ -465,12 +463,12 @@ class NativeSDKBackend(SDKBackend):
                 reason = "no_direct_successor"
                 if parent:
                     try:
-                        agent = await self.client.agents.resume(parent.agent_id, options)
+                        agent = await client.agents.resume(parent.agent_id, options)
                         reason = "direct_successor"
                     except Exception:
                         parent, new_history, reason = None, session.history, "resume_unavailable"
                 if agent is None:
-                    agent = await self.client.agents.create(options)
+                    agent = await client.agents.create(options)
                     if session.recovery:
                         session.replay = completed_results(session.history)
                         if reason == "no_direct_successor":
@@ -481,7 +479,7 @@ class NativeSDKBackend(SDKBackend):
                 session.stats.update(reuse_mode="resume" if parent else "cold", reuse_reason=reason,
                                      send_chars=len(prompt), resumed=parent is not None)
                 def observe(event):
-                    self._touch()
+                    self._touch(session.record)
                     kind = event.get("type") if isinstance(event, dict) else getattr(event, "type", None)
                     text = event.get("text", "") if isinstance(event, dict) else getattr(event, "text", "")
                     if kind in ("text-delta", "thinking-delta") and text:
@@ -494,7 +492,7 @@ class NativeSDKBackend(SDKBackend):
                 run = session.run = await agent.send(message, SendOptions(on_delta=observe))
                 full = done = False
                 async for event in run.events():
-                    self._touch()
+                    self._touch(session.record)
                     full |= bool(event.result_is_full)
                     done |= event.kind == "done"
                 result = await run.wait()
@@ -520,7 +518,7 @@ class NativeSDKBackend(SDKBackend):
                 error = DeadlineExpired()
             stats_context = REQUEST_STATS.set(session.stats)
             try:
-                await self._probe_auth_failure(error)
+                await self._probe_auth_failure(error, client)
             except KeyInvalid as auth_error:
                 error = session.error = auth_error
             finally:
@@ -541,12 +539,13 @@ class NativeSDKBackend(SDKBackend):
                 with contextlib.suppress(Exception, asyncio.CancelledError):
                     await asyncio.wait_for(agent.close(), 3)
             if failure is not None:
-                # A failed send can have no run handle while upstream work has
-                # started. Retire the owned bridge before declaring it idle.
-                await super().close()
-            self._sessions.pop(id(session), None)
-            self.active = None
-            self.lock.release()
+                # Other runs may share this bridge; it closes once they finish.
+                self._retire(client)
+            try:
+                # Stay an open run until a retired bridge has finished closing.
+                await self._release(session.record)
+            finally:
+                self._sessions.pop(id(session), None)
         if failure is not None and not session.boundary.done():
             # Publish failures after cleanup and without this coroutine's active
             # traceback. A receiver is allowed to inspect/clear its exception.

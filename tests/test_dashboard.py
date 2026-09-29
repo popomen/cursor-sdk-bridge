@@ -82,6 +82,24 @@ class DescribeTests(unittest.TestCase):
         self.assertIn('预期', dashboard.describe(SPEC, old, None)['notes'][0])
 
 
+    def test_concurrent_runs_are_listed_and_tool_waits_are_not_stalls(self):
+        base = {'model': MAX, 'running_s': 400.0, 'events': 50, 'idle_s': 300.0, 'deadline_s': 1800.0}
+        waiting = {**base, 'state': 'awaiting_tool_results'}
+        health = {**CURRENT, 'limits': {**CURRENT['limits'], 'max_concurrency': 3},
+                  'progress': {'queued': 2, 'active': waiting, 'runs': [waiting]}}
+        item = dashboard.describe(SPEC, health, None)
+        self.assertEqual(item['state'], 'running')
+        self.assertIn('并发已满（上限 3）', item['notes'][-1])
+        stuck = {**base, 'model': 'claude-opus-5-5-high', 'state': 'running'}
+        health['progress'] = {'queued': 0, 'active': waiting, 'runs': [waiting, stuck]}
+        item = dashboard.describe(SPEC, health, None)
+        self.assertEqual((item['state'], len(item['notes'])), ('stalled', 1))
+        self.assertTrue(item['notes'][0].startswith(dashboard.tier(stuck['model'])))
+        html = dashboard.card(item)
+        self.assertIn('等待工具结果', html)
+        self.assertIn('并发上限 3', html)
+        self.assertEqual(html.count('距上次事件'), 2)
+
 class SummaryTests(unittest.TestCase):
     def test_window_rejections_percentiles_and_tokens(self):
         entries = [

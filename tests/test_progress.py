@@ -15,7 +15,7 @@ from test_cursor_sdk2api import StubSDK
 from test_sdk_backend import StubClient
 
 MAX = "claude-opus-5-5-max"
-IDLE = {"queued": 0, "active": None}
+IDLE = {"queued": 0, "active": None, "runs": []}
 
 
 class ProgressSDK(StubSDK):
@@ -33,7 +33,7 @@ class BackendProgressTests(unittest.IsolatedAsyncioTestCase):
         key = root / "key"
         key.write_text("synthetic-test-key")
         key.chmod(0o600)
-        self.backend = SDKBackend(key, root / "workspace", timeout=5)
+        self.backend = SDKBackend(key, root / "workspace", timeout=5, max_concurrency=2)
         self.backend.key = "synthetic-test-key"
         self.backend.workspace.mkdir()
         self.client = self.backend.client = StubClient()
@@ -51,21 +51,25 @@ class BackendProgressTests(unittest.IsolatedAsyncioTestCase):
             yield SimpleNamespace(kind="done", result_is_full=False)
         self.client.events = events
         self.assertEqual(self.backend.progress(), IDLE)
-        running = [asyncio.create_task(self.backend.generate(model, "private-prompt"))
-                   for model in (MAX, "claude-opus-5-5-high")]
+        # The stub shares one agent, so every concurrent request uses one model.
+        running = []
+        for _ in range(3):
+            running.append(asyncio.create_task(self.backend.generate(MAX, "private-prompt")))
+            await asyncio.sleep(0.01)
         for _ in range(200):
             await asyncio.sleep(0.01)
             report = self.backend.progress()
-            if report["queued"] == 1 and report["active"] and report["active"]["events"] == 2:
+            if report["queued"] == 1 and [run["events"] for run in report["runs"]] == [2, 2]:
                 break
         self.assertEqual(report["queued"], 1)
-        self.assertEqual(report["active"]["model"], MAX)
-        self.assertEqual(report["active"]["events"], 2)
+        self.assertEqual([run["model"] for run in report["runs"]], [MAX, MAX])
+        self.assertEqual(report["active"], report["runs"][0])
+        self.assertGreaterEqual(report["runs"][0]["running_s"], report["runs"][1]["running_s"])
         self.assertEqual(report["active"]["deadline_s"], 5)
         self.assertGreaterEqual(report["active"]["running_s"], report["active"]["idle_s"])
         self.assertNotIn("private-prompt", json.dumps(report))
         release.set()
-        self.assertEqual(await asyncio.gather(*running), ['{"output":[]}'] * 2)
+        self.assertEqual(await asyncio.gather(*running), ['{"output":[]}'] * 3)
         self.assertEqual(self.backend.progress(), IDLE)
 
     async def test_failures_clear_active_inference_and_queue(self):
@@ -78,12 +82,9 @@ class BackendProgressTests(unittest.IsolatedAsyncioTestCase):
             await self.backend.generate("claude-opus-5-5-high", "prompt")
         self.assertEqual(self.backend.progress(), IDLE)
         self.backend.queue_timeout = 0.05
-        await self.backend.lock.acquire()
-        try:
-            with self.assertRaises(QueueTimeout):
-                await self.backend.generate(MAX, "prompt")
-        finally:
-            self.backend.lock.release()
+        self.backend.slots = asyncio.Semaphore(0)
+        with self.assertRaises(QueueTimeout):
+            await self.backend.generate(MAX, "prompt")
         self.assertEqual(self.backend.progress(), IDLE)
 
 
@@ -122,10 +123,11 @@ class HealthProgressTests(unittest.TestCase):
         self.assertNotIn("progress", service_report(port))
 
     def test_health_reports_sdk_limits(self):
-        limits = {"deadlines": {"high": 1200, "xhigh": 1200, "max": 1800}, "queue_timeout": 1800}
+        limits = {"deadlines": {"high": 1200, "xhigh": 1200, "max": 1800}, "queue_timeout": 1800,
+                  "max_concurrency": 5}
         with tempfile.TemporaryDirectory() as temp:
             backend = SDKBackend(Path(temp) / "key", Path(temp) / "workspace", timeouts=limits["deadlines"],
-                                 queue_timeout=limits["queue_timeout"])
+                                 queue_timeout=limits["queue_timeout"], max_concurrency=5)
             self.assertEqual(self.health(self.serve(backend))["limits"], limits)
 
 
