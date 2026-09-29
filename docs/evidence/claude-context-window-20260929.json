@@ -71,5 +71,37 @@
     "codex_instance": "unchanged global 3 MiB; its history has more bytes per token",
     "rejected_continuation": "cancels the paused run it would have resumed",
     "restart": "refusals list inference, tool waits and queued requests; --force drops them"
+  },
+  "acceptance": {
+    "recorded_at": "2026-09-30T00:34:00+08:00",
+    "deployed_version": "80074b0c0e7559e8fb3837a8f354a05d558a78ae",
+    "claude_code_version": "2.1.284",
+    "rejected_prompt_bytes": [
+      2122423,
+      2087861,
+      2087861,
+      1926272,
+      1926272,
+      1917246,
+      1917246
+    ],
+    "rejection_duration_s_max": 0.347,
+    "compaction_request": {
+      "outcome": "completed",
+      "prompt_bytes": 1873304,
+      "duration_s": 504.9
+    },
+    "compact_boundary": {
+      "trigger": "auto",
+      "post_tokens": 223188
+    },
+    "after_compaction": {
+      "first_prompt_bytes": 459429,
+      "completed": 8,
+      "failed": 0,
+      "max_prompt_bytes": 490050,
+      "api_error_messages": 0
+    },
+    "note": "The resumed turn got a 400; Claude Code retried with shorter histories until its compaction request fit under 1,900,000 bytes."
   }
 }
