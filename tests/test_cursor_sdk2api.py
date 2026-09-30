@@ -4,7 +4,7 @@ import json
 import threading
 import unittest
 
-from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
+from cursor_sdk_bridge.cursor_sdk2api import MAX_CONCURRENCY, Service, make_server
 from cursor_sdk_bridge.responses_protocol import MODELS, request_payload
 
 MODEL = "claude-opus-5-5-high"
@@ -40,6 +40,12 @@ class ResponsesTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join()
         self.service.close()
+
+    def test_requests_beyond_max_concurrency_queue_instead_of_refusal(self):
+        admitted = [self.service.admission.acquire(blocking=False) for _ in range(MAX_CONCURRENCY + 1)]
+        for held in filter(None, admitted):
+            self.service.admission.release()
+        self.assertTrue(all(admitted))
 
     def post(self, body):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)

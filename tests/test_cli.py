@@ -1,5 +1,6 @@
 import contextlib
 import io
+import os
 import sys
 import unittest
 from unittest.mock import patch
@@ -23,6 +24,10 @@ class CLITests(unittest.TestCase):
         self.assertEqual(args[:2], ['--port', '8790'])
         self.assertIn('1800', args)
         self.assertEqual(args[args.index('--max-prompt-bytes-1m') + 1], '1900000')
+        self.assertEqual(args[args.index('--max-concurrency') + 1], '8')
+        with patch.dict(os.environ, {'CURSOR_FALLBACK_MAX_CONCURRENCY': '5'}):
+            overridden = self.invoked(['serve', 'claude'], 'cursor_sdk_bridge.cursor_sdk2api.main')
+        self.assertEqual(overridden[overridden.index('--max-concurrency') + 1], '5')
         self.assertEqual(args[-2:], ['--mode', 'legacy'])
         self.assertEqual(self.invoked(['serve', 'dashboard', '--port', '9891'], 'cursor_sdk_bridge.dashboard.main'),
                          ['--port', '9891'])

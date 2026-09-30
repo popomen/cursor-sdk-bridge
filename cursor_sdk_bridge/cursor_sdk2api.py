@@ -26,7 +26,9 @@ MAX_BODY = 64 * 1024 * 1024
 MAX_CACHE_BYTES = 256 * 1024 * 1024
 MAX_PROMPT_BYTES = 3 * 1024 * 1024
 MAX_TIMEOUT = 1800
-MAX_ADMISSION = 8
+MAX_CONCURRENCY = 8
+# Running plus queued requests; beyond this the adapter answers 429 queue_full.
+MAX_ADMISSION = 16
 REQUEST_MARGIN = 30
 KEEPALIVE_SECONDS = 10
 # A queued job that no request awaits is cancelled after this; a client retry within it joins the job.
@@ -575,8 +577,8 @@ def main():
         parser.error(f"timeouts must be greater than 0 and at most {MAX_TIMEOUT} seconds")
     if not 0 < args.queue_timeout <= MAX_TIMEOUT:
         parser.error(f"--queue-timeout must be greater than 0 and at most {MAX_TIMEOUT} seconds")
-    if not 0 < args.max_concurrency <= MAX_ADMISSION:
-        parser.error(f"--max-concurrency must be between 1 and {MAX_ADMISSION}")
+    if not 0 < args.max_concurrency <= MAX_CONCURRENCY:
+        parser.error(f"--max-concurrency must be between 1 and {MAX_CONCURRENCY}")
     if args.max_prompt_bytes <= 0:
         parser.error("--max-prompt-bytes must be positive")
     context_prompt_bytes = {context: getattr(args, "max_prompt_bytes_" + context) for context in CONTEXTS

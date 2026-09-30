@@ -48,7 +48,8 @@ def serve(arguments):
         # and the run's own growth still fit. Codex history has more bytes per token and keeps the global limit.
         defaults = ['--port', '8790', '--state-dir', str(Path.home() / '.codex/cursor-sdk2api-claude'),
                     '--timeout-max', '1800', '--queue-timeout', '1800',
-                    '--max-prompt-bytes-1m', '1900000', '--max-prompt-bytes-300k', '500000']
+                    '--max-prompt-bytes-1m', '1900000', '--max-prompt-bytes-300k', '500000',
+                    '--max-concurrency', os.environ.get('CURSOR_FALLBACK_MAX_CONCURRENCY', '8')]
     return invoke(cursor_sdk2api, defaults + arguments)
 
 
