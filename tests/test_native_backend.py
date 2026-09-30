@@ -9,6 +9,7 @@ import unittest
 from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, UpstreamIncomplete
 from cursor_sdk_bridge.native_backend import NativeSDKBackend, completed_results, native_prompt
 from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.sdk_backend import Slots
 from cursor_sdk_bridge.responses_protocol import InvalidRequest, complete_response, prepare_request, response_shell
 
 
@@ -286,7 +287,7 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         await self.idle()
         self.assertTrue(self.sdk.runs[0].cancelled)
         self.assertEqual(self.backend.running, {})
-        self.assertEqual(self.backend.slots._value, self.backend.max_concurrency)
+        self.assertEqual(self.backend.slots.busy, 0)
         history += first["output"] + [{"type": "function_call_output", "call_id": call["call_id"], "output": "saved"}]
         self.backend.client = self.sdk
         final, stats, _ = await self.turn(history, tools=[TOOL])
@@ -512,34 +513,63 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.backend._by_call)
         self.assertIsNone(self.backend.client)
 
-    async def test_concurrent_runs_await_tools_independently_and_queue_beyond_limit(self):
-        self.backend.max_concurrency, self.backend.slots = 2, asyncio.Semaphore(2)
-        self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "one")],
-                            [("tools", [("lookup", {"key": "b"})]), ("text", "two")],
-                            [("text", "three")]]
+    async def test_runs_awaiting_tools_yield_slots_and_resume_over_the_limit(self):
+        self.backend.max_concurrency, self.backend.slots = 2, Slots(2)
+        gates = [asyncio.Event() for _ in range(3)]
+        self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("wait", gates[0]), ("text", "one")],
+                            [("tools", [("lookup", {"key": "b"})]), ("wait", gates[1]), ("text", "two")],
+                            [("wait", gates[2]), ("text", "three")], [("text", "four")]]
         histories = [[{"role": "user", "content": "first"}], [{"role": "user", "content": "second"}]]
         firsts = await asyncio.gather(*(self.turn(history, tools=[TOOL]) for history in histories))
         report = self.backend.progress()
-        self.assertEqual(len(report["runs"]), 2)
         self.assertEqual({run["state"] for run in report["runs"]}, {"awaiting_tool_results"})
-        self.assertEqual(report["pending_tools"], 2)
+        self.assertEqual((report["pending_tools"], self.backend.slots.busy), (2, 0))
         third = asyncio.create_task(self.turn([{"role": "user", "content": "third"}]))
-        await asyncio.sleep(0.02)
-        self.assertEqual(self.backend.progress()["queued"], 1)
-        self.assertFalse(third.done())
-        finals = []
+        for _ in range(100):
+            if len(self.sdk.runs) == 3:
+                break
+            await asyncio.sleep(0.005)
+        self.assertEqual((self.backend.progress()["queued"], self.backend.slots.busy), (0, 1))
+        resumed = []
         for history, (first, _, _) in zip(histories, firsts):
             history += first["output"] + [{"type": "function_call_output",
                 "call_id": first["output"][0]["call_id"], "output": "result"}]
-            final, _, _ = await self.turn(history, tools=[TOOL])
-            finals.append(final["output"][0]["content"][0]["text"])
-        self.assertEqual(sorted(finals), ["one", "two"])
-        response, stats, _ = await asyncio.wait_for(third, 1)
-        self.assertEqual(response["output"][0]["content"][0]["text"], "three")
+            resumed.append(asyncio.create_task(self.turn(history, tools=[TOOL])))
+        await asyncio.sleep(0.02)
+        self.assertEqual(self.backend.slots.busy, 3)
+        fourth = asyncio.create_task(self.turn([{"role": "user", "content": "fourth"}]))
+        await asyncio.sleep(0.02)
+        self.assertEqual(self.backend.progress()["queued"], 1)
+        gates[0].set()
+        await asyncio.sleep(0.02)
+        self.assertEqual((self.backend.progress()["queued"], self.backend.slots.busy), (1, 2))
+        gates[1].set()
+        response, stats, _ = await asyncio.wait_for(fourth, 1)
+        self.assertEqual(response["output"][0]["content"][0]["text"], "four")
         self.assertGreater(stats["queue_s"], 0)
+        gates[2].set()
+        results = await asyncio.wait_for(asyncio.gather(third, *resumed), 1)
+        self.assertEqual(sorted(result[0]["output"][0]["content"][0]["text"] for result in results),
+                         ["one", "three", "two"])
         await self.idle()
-        self.assertEqual(self.backend.running, {})
-        self.assertEqual(self.backend.slots._value, 2)
+        self.assertEqual((self.backend.running, self.backend.slots.busy), ({}, 0))
+
+    async def test_slot_handed_to_a_cancelled_waiter_passes_to_the_next(self):
+        slots = Slots(1)
+        await slots.acquire()
+        first, second = asyncio.create_task(slots.acquire()), asyncio.create_task(slots.acquire())
+        await asyncio.sleep(0)
+        slots.release()
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+        await asyncio.wait_for(second, 1)
+        self.assertEqual((slots.busy, len(slots.waiters)), (1, 0))
+        blocked = Slots(0)
+        with self.assertRaises(TimeoutError):
+            async with asyncio.timeout(0.01):
+                await blocked.acquire()
+        self.assertEqual((blocked.busy, len(blocked.waiters)), (0, 0))
 
     async def test_failed_run_retires_shared_bridge_after_other_runs_finish(self):
         gate = asyncio.Event()
@@ -569,7 +599,7 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
             await self.turn([{"role": "user", "content": "timeout"}])
         self.assertTrue(self.sdk.runs[0].cancelled)
         self.assertEqual(self.backend.running, {})
-        self.assertEqual(self.backend.slots._value, self.backend.max_concurrency)
+        self.assertEqual(self.backend.slots.busy, 0)
         self.assertEqual(self.sdk.auth_probes, 0)
 
     async def test_each_tool_response_gets_a_fresh_inference_deadline(self):
@@ -617,7 +647,7 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
             await self.turn(history, tools=[TOOL])
         self.assertTrue(self.sdk.runs[0].cancelled)
         self.assertEqual(self.backend.running, {})
-        self.assertEqual(self.backend.slots._value, self.backend.max_concurrency)
+        self.assertEqual(self.backend.slots.busy, 0)
 
     async def test_waiting_tool_has_pending_timeout_with_inference_clock_stopped(self):
         self.backend.timeouts = {effort: 0.2 for effort in ("high", "xhigh", "max")}
@@ -689,8 +719,30 @@ class NativeBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["output"][0]["content"][0]["text"], "done")
         self.assertEqual(len(self.sdk.sent), 1)
 
-    async def test_extra_context_rebuilds_and_replays_completed_tool(self):
-        for role in ("user", "assistant", "system", "developer"):
+    async def test_user_messages_ride_with_tool_results_in_the_paused_run(self):
+        self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "context followed")]]
+        history = [{"role": "user", "content": "initial"}]
+        first, _, _ = await self.turn(history, tools=[TOOL])
+        marker = self.backend._by_call[first["output"][0]["call_id"]].marker
+        self.assertIn(marker, self.sdk.sent[-1][1])
+        history += first["output"] + [{"type": "function_call_output",
+            "call_id": first["output"][0]["call_id"], "output": "completed"},
+            {"role": "user", "content": "<system-reminder>new context</system-reminder>"},
+            {"role": "user", "content": [{"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="},
+                                         {"type": "input_text", "text": "look"}]}]
+        final, stats, _ = await self.turn(history, tools=[TOOL])
+        self.assertEqual((stats["reuse_mode"], stats["context_messages"]), ("tool_continuation", 2))
+        self.assertNotIn("reuse_reason", stats)
+        self.assertEqual(len(self.sdk.sent), 1)
+        [delivered] = self.sdk.callback_results
+        self.assertEqual(delivered["content"][:3], [{"type": "text", "text": "completed"}, {"type": "text", "text": marker},
+            {"type": "text", "text": "<system-reminder>new context</system-reminder>"}])
+        self.assertEqual([(part["type"], part.get("mimeType")) for part in delivered["content"][3:]],
+                         [("image", "image/png"), ("text", None)])
+        self.assertEqual(final["output"][0]["content"][0]["text"], "context followed")
+
+    async def test_non_user_context_rebuilds_and_replays_completed_tool(self):
+        for role in ("assistant", "system", "developer"):
             with self.subTest(role=role):
                 self.sdk.scripts = [[("tools", [("lookup", {"key": "a"})]), ("text", "discarded")],
                                     [("tools", [("lookup", {"key": "a"})]), ("text", "new context followed")]]

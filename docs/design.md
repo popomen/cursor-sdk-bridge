@@ -14,7 +14,7 @@ Native built-in shell, file and task tools remain disabled. Only registered clie
 
 The three public aliases select SDK model `claude-opus-5-5`, context `1m`, fast mode `false`, and the named effort. A returned model mismatch fails the request; there is no silent model fallback. Messages supports client custom tools, text, images and tool results; it filters Anthropic server tools such as hosted web search. It does not forward every Anthropic generation option, including `max_tokens`, `thinking`, `output_config` and cache-control directives.
 
-`count_tokens` is an estimate. Real usage comes from the SDK, whose input total already includes cache reads and writes; Messages subtracts both to report uncached `input_tokens` separately.
+`count_tokens` and the usage in each response are estimates from the rendered prompt, about 2.3 bytes per token plus a 3k-token SDK preamble and 1,600 tokens per image; `prompt is too long` uses the same units. The SDK reports usage once per run, when the run finishes, summed over every model call in it. A tool-use response therefore has no usage of its own, and a final usage counts the context once per model call; clients that size their context window from usage, such as Claude Code's auto-compaction, would compact at the wrong time. Cache fields are reported as zero. Request logs keep the SDK's real usage, whose input total already includes cache reads and writes, in `usage` on the segment that finished the run, for quota accounting; the client-facing estimate goes in `reported_usage`.
 
 ## Ownership and recovery
 
@@ -28,7 +28,7 @@ Native callback Futures and run consumers outlive a public tool-call response. P
 
 If a client edits earlier history while returning a pending batch, the bridge first verifies every pending call's ID, name, argument types and result. It then retires that paused run and rebuilds from the updated history. Incomplete or altered pending calls are rejected without consuming their results.
 
-Claude Code can append system context, including task reminders, after tool results. These valid messages also require reconstruction because an SDK callback cannot carry a separate conversation message. The bridge preserves that context and replays completed tools.
+Claude Code appends context after tool results, such as task reminders, environment updates and user interjections. An SDK callback result has no separate message channel, so user-role messages ride in the last result of the batch, after a marker line unique to the run. The run's first prompt declares that marker as the start of client input, not tool output. Text and images both travel this way and the paused run continues; the request log counts them in `context_messages`. System, developer and assistant messages still retire the paused run: the bridge rebuilds from the updated history and replays completed tools.
 
 ## Streaming and operations
 

@@ -177,8 +177,48 @@ class ClaudeSwitchTests(unittest.TestCase):
             self.assertEqual(self.switch("cursor"), "switched")
         self.assertEqual(self.load()["model"], "claude-opus-5-5-max")
 
+    def install_before_auto_compact(self):
+        key = ("env", "CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+        real = switcher.cursor_values
+
+        def older(settings, port):
+            return {path: value for path, value in real(settings, port).items() if path != key}
+        with patch.multiple(switcher, MANAGED=[path for path in switcher.MANAGED if path != key], cursor_values=older):
+            self.assertEqual(self.switch("cursor"), "switched")
+        self.assertNotIn(".".join(key), json.loads(self.state.read_text())["original"])
+
+    def test_upgrade_manages_a_new_key_and_restore_returns_its_prior_value(self):
+        self.install_before_auto_compact()
+        settings = self.load()
+        settings["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "500000"
+        self.write(settings)
+        report = switcher.status(self.settings, self.state)
+        self.assertEqual((report["provider"], report["update_available"]), ("cursor", True))
+        self.assertEqual(self.switch("cursor"), "updated")
+        self.assertEqual(self.load()["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], switcher.AUTO_COMPACT_WINDOW)
+        report = switcher.status(self.settings, self.state)
+        self.assertEqual((report["provider"], report["update_available"], len(self.probes)), ("cursor", False, 1))
+        self.assertEqual(self.switch("restore"), "restored")
+        expected = json.loads(json.dumps(ORIGINAL))
+        expected["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "500000"
+        self.assertEqual(self.load(), expected)
+
+    def test_restore_from_a_backup_without_newly_managed_keys_leaves_them(self):
+        self.install_before_auto_compact()
+        self.assertEqual(self.switch("restore"), "restored")
+        self.assertEqual(self.load(), ORIGINAL)
+        self.assertFalse(self.state.exists())
+
+    def test_auto_compact_starts_well_below_the_1m_prompt_limit(self):
+        from cursor_sdk_bridge.anthropic_protocol import estimate_tokens
+        window = int(switcher.AUTO_COMPACT_WINDOW)
+        # Claude Code compacts at the window minus 20k output and 13k buffer tokens.
+        self.assertGreaterEqual(estimate_tokens(1_900_000 - 200_000), window - 33_000)
+        self.assertLessEqual(window, 1_000_000)
+
     def test_models_carry_the_1m_suffix_but_the_service_check_uses_bare_ids(self):
-        self.assertEqual((switcher.MAIN, switcher.FAST), ("claude-opus-5-5-max[1m]", "claude-opus-5-5-high[1m]"))
+        self.assertEqual((switcher.MAIN, switcher.FAST), ("claude-opus-5-5-max[1m]", "claude-opus-5-5-low-fast[1m]"))
+        self.assertIn(switcher.FAST, switcher.MODELS)
         health = {"service": "cursor-sdk2api", "capabilities": ["anthropic_messages"]}
 
         def serving(ids):

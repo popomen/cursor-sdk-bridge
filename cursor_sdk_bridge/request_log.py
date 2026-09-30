@@ -9,6 +9,8 @@ import threading
 
 
 REQUEST_STATS = contextvars.ContextVar("request_stats", default=None)
+# The service job running in this context; SDK admission marks it queued while it waits for a slot.
+CURRENT_JOB = contextvars.ContextVar("service_job", default=None)
 
 
 class RequestLog:

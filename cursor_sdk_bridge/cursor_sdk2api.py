@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from collections import OrderedDict
 import concurrent.futures
+import contextlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -13,9 +14,9 @@ import threading
 import time
 
 from cursor_sdk_bridge.anthropic_protocol import (ERROR_TYPES, complete_message, error_body, estimate_tokens, failure_error,
-                                message_shell, prepare_messages, stream_events)
+                                message_shell, prepare_messages, reported_usage, stream_events)
 from cursor_sdk_bridge.failures import InvalidModelOutput, NativeProtocolError, PromptTooLarge, RequestTimeout, error_code, failure_label
-from cursor_sdk_bridge.request_log import REQUEST_STATS, RequestLog
+from cursor_sdk_bridge.request_log import CURRENT_JOB, REQUEST_STATS, RequestLog
 from cursor_sdk_bridge.ledger import ResultLedger, request_digest
 from cursor_sdk_bridge.live_output import LiveOutput, MessagesLive, ResponsesLive
 from cursor_sdk_bridge.responses_protocol import (InvalidRequest, MODELS, complete_response, completion_events,
@@ -28,6 +29,8 @@ MAX_TIMEOUT = 1800
 MAX_ADMISSION = 8
 REQUEST_MARGIN = 30
 KEEPALIVE_SECONDS = 10
+# A queued job that no request awaits is cancelled after this; a client retry within it joins the job.
+ORPHAN_GRACE = 30
 POST_PATHS = ("/v1/responses", "/v1/messages", "/v1/messages/count_tokens")
 # Each Claude Code retry reruns a full SDK inference; by default it retries a 5xx up to 10 times.
 NO_RETRY = (("x-should-retry", "false"),)
@@ -40,6 +43,12 @@ def model_list():
              "display_name": f"{spec.display_name} (Cursor)", "created_at": "2026-09-25T00:00:00Z"}
             for model, spec in MODELS.items()]
     return {"object": "list", "data": data, "has_more": False, "first_id": data[0]["id"], "last_id": data[-1]["id"]}
+
+
+class Job:
+    def __init__(self, key, shell, stats):
+        self.key, self.shell, self.stats = key, shell, stats
+        self.future, self.subscribers, self.queued, self.orphaned = None, 1, False, False
 
 
 class Service:
@@ -127,11 +136,12 @@ class Service:
                 if discard:
                     discard(getattr(text, "reuse_token", None))
                 raise
-        usage = stats.get("usage") if stats else None
-        if usage:
-            response["usage"] = {"input_tokens": usage["input_tokens"], "output_tokens": usage["output_tokens"],
-                                 "total_tokens": usage["input_tokens"] + usage["output_tokens"],
-                                 "input_tokens_details": {"cached_tokens": usage["cache_read_tokens"]}}
+        usage = reported_usage(len(prompt.encode()), images, response)
+        response["usage"] = {"input_tokens": usage["input_tokens"], "output_tokens": usage["output_tokens"],
+                             "total_tokens": usage["input_tokens"] + usage["output_tokens"],
+                             "input_tokens_details": {"cached_tokens": usage["cache_read_tokens"]}}
+        if stats is not None:
+            stats["reported_usage"] = {"input_tokens": usage["input_tokens"], "output_tokens": usage["output_tokens"]}
         commit = getattr(self.backend, "commit_response", None)
         if commit:
             commit(history, body, response, getattr(text, "reuse_token", None))
@@ -148,7 +158,8 @@ class Service:
                 while len(self.cache) > 32 or sum(v[2] for v in self.cache.values()) > MAX_CACHE_BYTES:
                     self.cache.popitem(last=False)
 
-    async def _run_job(self, digest, shell, body, history, prompt, stats, images, live):
+    async def _run_job(self, job, digest, shell, body, history, prompt, stats, images, live):
+        CURRENT_JOB.set(job)
         began = time.monotonic()
         outcome = "completed"
         try:
@@ -159,7 +170,10 @@ class Service:
         except BaseException as exc:
             if isinstance(exc, InvalidRequest):
                 stats["request_error"] = exc.code
-            outcome = "service_stopped" if isinstance(exc, asyncio.CancelledError) else failure_label(exc)
+            if isinstance(exc, asyncio.CancelledError):
+                outcome = "orphan_cancelled" if job.orphaned else "service_stopped"
+            else:
+                outcome = failure_label(exc)
             raise
         finally:
             if self.ledger:
@@ -180,10 +194,11 @@ class Service:
             if self.ledger:
                 existing = self.jobs.get(digest)
                 if existing:
-                    future, prior_shell, prior_stats = existing
+                    future, prior_shell, prior_stats = existing.future, existing.shell, existing.stats
                     shell.update(prior_shell)
+                    existing.subscribers += 1
                     subscriber = concurrent.futures.Future()
-                    subscriber.live_output = future.live_output
+                    subscriber.live_output, subscriber.job = future.live_output, existing
                     def joined(done):
                         stats.update(prior_stats, dedup="joined")
                         if subscriber.cancelled():
@@ -211,16 +226,39 @@ class Service:
                 raise RuntimeError("inference queue is full")
             # Keep separate jobs in fixtures/explicit no-ledger mode.
             key = digest if self.ledger else shell["id"]
-            live = LiveOutput()
+            live, job = LiveOutput(), Job(key, dict(shell), stats)
             future = asyncio.run_coroutine_threadsafe(
-                self._run_job(digest, shell, body, history, prompt, stats, images, live), self.loop)
-            future.live_output = live
-            self.jobs[key] = (future, dict(shell), stats)
+                self._run_job(job, digest, shell, body, history, prompt, stats, images, live), self.loop)
+            future.live_output, future.job, job.future = live, job, future
+            self.jobs[key] = job
             def finished(done):
                 with self.submit_lock:
-                    self.jobs.pop(key, None)
+                    if self.jobs.get(key) is job:
+                        del self.jobs[key]
             future.add_done_callback(finished)
             return future
+
+    def release(self, future):
+        """Called once by each request that got a future from submit, when it stops waiting."""
+        job = getattr(future, "job", None)
+        if job is None:
+            return
+        with self.submit_lock:
+            job.subscribers -= 1
+            if job.subscribers or job.future.done():
+                return
+        with contextlib.suppress(RuntimeError):  # The loop is closed once the service has stopped.
+            self.loop.call_soon_threadsafe(self.loop.call_later, ORPHAN_GRACE, self._reap_orphan, job)
+
+    def _reap_orphan(self, job):
+        # Started inference keeps running so a retry can use its ledger result; only queued work is dropped.
+        with self.submit_lock:
+            if job.subscribers or not job.queued or job.future.done():
+                return
+            job.orphaned = True
+            if self.jobs.get(job.key) is job:
+                del self.jobs[job.key]
+        job.future.cancel()
 
     async def _close(self):
         tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
@@ -404,6 +442,7 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
         finally:
+            service.release(future)
             service.admission.release()
             service.record(**({"event": "http"} if service.ledger else {}), **entry, **stats, outcome=outcome, duration_s=round(time.monotonic() - began, 3),
                            bridge_launches=getattr(service.backend, "launches", None))
@@ -451,6 +490,7 @@ class Handler(BaseHTTPRequestHandler):
             shell = response_shell(body["model"])
             future = service.submit(shell, request, history, prompt, stats, images)
             message["id"] = "msg_" + shell["id"].removeprefix("resp_")
+            message["usage"]["input_tokens"] = estimate_tokens(entry["prompt_bytes"], images)
             if streaming:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -461,7 +501,7 @@ class Handler(BaseHTTPRequestHandler):
                 emit("message_start", {"type": "message_start", "message": message})
             response, streamed_items = self._wait_inference(future, MessagesLive(emit) if streaming else None,
                 lambda: emit("ping", {"type": "ping"}))
-            result = complete_message(message, response, stats.get("usage"))
+            result = complete_message(message, response, reported_usage(entry["prompt_bytes"], images, response))
             if streaming:
                 for kind, data in stream_events(result, start_index=streamed_items):
                     emit(kind, data)
@@ -481,6 +521,7 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
         finally:
+            service.release(future)
             service.admission.release()
             service.record(**({"event": "http"} if service.ledger else {}), **entry, **stats, outcome=outcome, duration_s=round(time.monotonic() - began, 3),
                            bridge_launches=getattr(service.backend, "launches", None))

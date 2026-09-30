@@ -9,6 +9,7 @@ from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, QueueTi
 from cursor_sdk_bridge.request_log import REQUEST_STATS
 from cursor_sdk_bridge.responses_protocol import complete_response, prepare_request, request_payload, response_shell
 from cursor_sdk_bridge.reuse_backend import ReuseSDKBackend, canonical_history, policy_digest
+from cursor_sdk_bridge.sdk_backend import Slots
 
 
 MODEL = "claude-opus-5-5-high"
@@ -277,12 +278,12 @@ class ReuseTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(DeadlineExpired):
             await self.initial()
         self.assertEqual(self.backend.running, {})
-        self.assertEqual(self.backend.slots._value, self.backend.max_concurrency)
+        self.assertEqual(self.backend.slots.busy, 0)
         self.assertEqual(self.backend._completed, {})
 
     async def test_queue_wait_does_not_bypass_parent_timeout(self):
         self.backend.queue_timeout = 0.01
-        self.backend.slots = asyncio.Semaphore(0)
+        self.backend.slots = Slots(0)
         with self.assertRaises(QueueTimeout):
             await self.initial()
         self.assertEqual(self.backend.waiting, 0)

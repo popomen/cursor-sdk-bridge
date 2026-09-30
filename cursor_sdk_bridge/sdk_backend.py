@@ -1,12 +1,13 @@
 """One shared native bridge; concurrent independent agents in a shared empty workspace."""
 import asyncio
+import collections
 import contextlib
 import contextvars
 from pathlib import Path
 import time
 
 from cursor_sdk_bridge.failures import DeadlineExpired, IsolationFailed, KeyInvalid, ModelMismatch, QueueTimeout, UpstreamIncomplete
-from cursor_sdk_bridge.request_log import REQUEST_STATS
+from cursor_sdk_bridge.request_log import CURRENT_JOB, REQUEST_STATS
 from cursor_sdk_bridge.models import EFFORTS, MODELS
 from cursor_sdk_bridge.sdk_support import NATIVE_TOOL_EVENTS, bridge_command, model_identity, snapshot
 
@@ -15,6 +16,41 @@ DEFAULT_QUEUE_TIMEOUT = 1200
 DEFAULT_MAX_CONCURRENCY = 3
 USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
 _RUN = contextvars.ContextVar("sdk_run", default=None)
+
+
+class Slots:
+    """First-come inference slots. A forced slot may exceed the limit; new runs then wait below it."""
+
+    def __init__(self, limit):
+        self.limit, self.busy, self.waiters = limit, 0, collections.deque()
+
+    async def acquire(self):
+        if self.busy < self.limit and not self.waiters:
+            self.busy += 1
+            return
+        waiter = asyncio.get_running_loop().create_future()
+        self.waiters.append(waiter)
+        try:
+            await waiter
+        except BaseException:
+            if waiter.done() and not waiter.cancelled():
+                # The slot was handed over as this waiter was cancelled.
+                self.release()
+            else:
+                with contextlib.suppress(ValueError):
+                    self.waiters.remove(waiter)
+            raise
+
+    def force(self):
+        self.busy += 1
+
+    def release(self):
+        self.busy -= 1
+        while self.waiters and self.busy < self.limit:
+            waiter = self.waiters.popleft()
+            if not waiter.done():
+                self.busy += 1
+                waiter.set_result(None)
 
 
 class SDKBackend:
@@ -26,7 +62,7 @@ class SDKBackend:
         self.queue_timeout, self.max_concurrency = queue_timeout, max_concurrency
         self.client = self.http = self.process = self.drain = None
         self.launches = 0
-        self.slots = asyncio.Semaphore(max_concurrency)
+        self.slots = Slots(max_concurrency)
         self.starting = asyncio.Lock()
         # Runs share one bridge. A failed run retires its bridge from new
         # admissions; the process closes once no remaining run still uses it.
@@ -64,6 +100,9 @@ class SDKBackend:
         # Queue wait and inference have separate bounds: waiting behind other
         # requests must not consume this request's inference deadline.
         queue = asyncio.timeout(self.queue_timeout)
+        job = CURRENT_JOB.get()
+        if job is not None:
+            job.queued = True
         self.waiting += 1
         try:
             async with queue:
@@ -74,14 +113,29 @@ class SDKBackend:
             raise
         finally:
             self.waiting -= 1
+            if job is not None:
+                job.queued = False
         now = time.monotonic()
         record = {"model": model, "started": now, "last": now, "events": 0, "client": None}
         self.running[id(record)] = record
         return record
 
+    def _park(self, record):
+        # A run waiting for client tool results does no inference, so its slot admits the next request.
+        if record is not None and not record.get("parked"):
+            record["parked"] = True
+            self.slots.release()
+
+    def _unpark(self, record):
+        # Resuming must not wait behind new requests: the paused SDK callback has its own pending timeout.
+        if record is not None and record.get("parked"):
+            record["parked"] = False
+            self.slots.force()
+
     async def _release(self, record):
         self.running.pop(id(record), None)
-        self.slots.release()
+        if not record.get("parked"):
+            self.slots.release()
         await self._reap()
 
     def _detach(self):

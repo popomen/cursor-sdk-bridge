@@ -48,7 +48,8 @@ STATES = {'offline': '离线', 'legacy': '旧版代码', 'idle': '空闲', 'runn
 OUTCOMES = {'completed': '完成', 'deadline_expired': '推理超时', 'queue_timeout': '排队超时',
             'request_timeout': '总时限超时', 'client_disconnected': '客户端断开', 'invalid_model_output': '输出格式不合法',
             'upstream_incomplete': '上游未完成', 'model_mismatch': '模型不符', 'isolation_failed': '隔离失败',
-            'key_invalid': 'key 无效', 'prompt_too_large': '上下文过长', 'queue_full': '队列已满'}
+            'key_invalid': 'key 无效', 'prompt_too_large': '上下文过长', 'queue_full': '队列已满',
+            'orphan_cancelled': '无人等待，已取消排队'}
 CSP = ('default-src {0}none{0}; style-src {0}unsafe-inline{0}; form-action {0}self{0}; '
        'frame-ancestors {0}none{0}').format(chr(39))
 CSS = ('body{font-family:system-ui,sans-serif;margin:24px;color:#1f2328;background:#f6f8fa}'

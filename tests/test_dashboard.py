@@ -268,7 +268,7 @@ class LedgerMeasurementTests(unittest.TestCase):
         joined = threading.Event()
         original_submit = self.service.submit
         with self.service.submit_lock:
-            original_future = next(iter(self.service.jobs.values()))[0]
+            original_future = next(iter(self.service.jobs.values())).future
 
         def observe_join(*args, **kwargs):
             future = original_submit(*args, **kwargs)

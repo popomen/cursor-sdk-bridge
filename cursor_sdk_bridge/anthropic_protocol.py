@@ -146,6 +146,29 @@ def usage_block(usage):
             "cache_creation_input_tokens": write, "cache_read_input_tokens": read}
 
 
+def output_bytes(response):
+    size = 0
+    for item in response["output"]:
+        if item["type"] == "message":
+            size += sum(len(part.get("text", "").encode()) for part in item["content"])
+        elif item["type"] == "reasoning":
+            size += sum(len(part.get("text", "").encode()) for part in item.get("summary", []))
+        else:
+            size += len(item["name"].encode()) + len(item["arguments"].encode())
+    return size
+
+
+def reported_usage(prompt_bytes, images, response):
+    """Client-facing usage for one response, in the units of count_tokens and the prompt limit.
+
+    The SDK reports usage once per run, when the run finishes, summed over every model call in it.
+    A tool-use response has no usage of its own, and a final one would count the context once per
+    model call, so clients that budget their context window from usage get an estimate instead.
+    """
+    return {"input_tokens": estimate_tokens(prompt_bytes, images),
+            "output_tokens": -(-output_bytes(response) * 10 // 23), "cache_read_tokens": 0, "cache_write_tokens": 0}
+
+
 def complete_message(shell, response, usage=None):
     content = []
     for item in response["output"]:

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from cursor_sdk_bridge import cursor_sdk2api
 from cursor_sdk_bridge.anthropic_protocol import (OMITTED, complete_message, estimate_tokens, message_shell, prepare_messages,
-                                prompt_too_long, stream_events, usage_block)
+                                prompt_too_long, reported_usage, stream_events, usage_block)
 from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
 from cursor_sdk_bridge.failures import DeadlineExpired, UpstreamIncomplete
 from cursor_sdk_bridge.probe_service import ProbeFailed, probe_messages, quadrant_png
@@ -34,6 +34,12 @@ ANTHROPIC_USAGE = {"input_tokens": 100, "output_tokens": 50, "cache_creation_inp
 REPLY = json.dumps({"output": [{"type": "message", "text": "Counting."},
                                {"type": "function_call", "call_id": "call_new", "name": "Bash",
                                 "arguments": json.dumps({"command": "ls | wc -l"})}]})
+REPLY_OUTPUT_TOKENS = -(-len("Counting." + "Bash" + json.dumps({"command": "ls | wc -l"})) * 10 // 23)
+
+
+def estimated(body, output_tokens):
+    return {"input_tokens": estimate_tokens(len(prepare_messages(body)[2].encode())), "output_tokens": output_tokens,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
 
 
 def image(source=None):
@@ -161,6 +167,14 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(estimate_tokens(2300, ["image"]), 3000 + 1000 + 1600)
         self.assertEqual(prompt_too_long(4600, 2300), "prompt is too long: 5000 tokens > 4000 maximum")
 
+    def test_reported_usage_counts_this_response_not_the_sdk_run(self):
+        body, history, _, _ = prepare_messages(claude_code_body())
+        response = complete_response({}, REPLY, body, history)
+        response["output"].insert(0, {"type": "reasoning", "summary": [{"type": "summary_text", "text": "t" * 23}]})
+        self.assertEqual(reported_usage(4600, ["image"], response),
+                         {"input_tokens": 3000 + 2000 + 1600, "output_tokens": REPLY_OUTPUT_TOKENS + 10,
+                          "cache_read_tokens": 0, "cache_write_tokens": 0})
+
 
 class MessagesHTTPTests(unittest.TestCase):
     def setUp(self):
@@ -214,12 +228,16 @@ class MessagesHTTPTests(unittest.TestCase):
                          + ["message_delta", "message_stop"])
         start = events[0]["message"]
         self.assertEqual((start["role"], start["model"], start["content"]), ("assistant", MAX, []))
+        self.assertEqual(start["usage"], estimated(claude_code_body(), 0))
         self.assertEqual(events[4]["content_block"]["name"], "Bash")
         self.assertEqual(json.loads(events[5]["delta"]["partial_json"]), {"command": "ls | wc -l"})
-        self.assertEqual((events[7]["delta"]["stop_reason"], events[7]["usage"]), ("tool_use", ANTHROPIC_USAGE))
+        self.assertEqual((events[7]["delta"]["stop_reason"], events[7]["usage"]),
+                         ("tool_use", estimated(claude_code_body(), REPLY_OUTPUT_TOKENS)))
         self.assertEqual([tool["name"] for tool in self.sdk.prompts[0]["tools"]], ["Bash"])
         entry = self.log_entries(1)[-1]
         self.assertEqual((entry["api"], entry["outcome"], entry["usage"]), ("messages", "completed", SDK_USAGE))
+        self.assertEqual(entry["reported_usage"], {"input_tokens": estimated(claude_code_body(), 0)["input_tokens"],
+                                                   "output_tokens": REPLY_OUTPUT_TOKENS})
 
     def test_keepalive_pings_while_sdk_runs(self):
         class SlowSDK(UsageSDK):
@@ -241,7 +259,7 @@ class MessagesHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual((message["type"], message["stop_reason"], message["content"]),
                          ("message", "end_turn", [{"type": "text", "text": "3"}]))
-        self.assertEqual(message["usage"], ANTHROPIC_USAGE)
+        self.assertEqual(message["usage"], estimated(claude_code_body(stream=False), 1))
 
     def test_count_tokens_estimates_without_sdk(self):
         body = claude_code_body()

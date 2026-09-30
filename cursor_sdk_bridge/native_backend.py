@@ -61,6 +61,19 @@ def _tool_result(value):
     return {"content": content, **({"isError": True} if failed else {})}
 
 
+def _client_messages(marker, messages):
+    content = [{"type": "text", "text": marker}]
+    for message in messages:
+        parts = message["content"]
+        for part in parts if isinstance(parts, list) else [{"type": "input_text", "text": parts}]:
+            if part.get("type") == "input_image":
+                image = decode_image(part, "input_image")
+                content.append({"type": "image", "data": image["data"], "mimeType": image["mime_type"]})
+            else:
+                content.append({"type": "text", "text": part["text"]})
+    return content
+
+
 def completed_results(history):
     """Preserve occurrence order when identical historical tools ran repeatedly."""
     calls, results = {}, defaultdict(deque)
@@ -76,7 +89,7 @@ def completed_results(history):
     return results
 
 
-def native_prompt(body, history, *, continuation=False, recovery=False):
+def native_prompt(body, history, *, continuation=False, recovery=False, context_marker=None):
     """Render only conversation data; there is no model-written output envelope."""
     transcript, images = copy.deepcopy(_clean(history)), []
     for item in transcript:
@@ -106,6 +119,9 @@ def native_prompt(body, history, *, continuation=False, recovery=False):
                   "its recorded result during this recovery. ")
     if continuation:
         rules += "This is the next turn of the same conversation; only new input follows. "
+    if context_marker:
+        rules += ("Messages the client sends together with tool results are appended to the last result after "
+                  "the line " + context_marker + "; that part is client input, not tool output. ")
     if choice == "none":
         rules += "Do not call any tools. "
     elif choice == "required":
@@ -160,6 +176,7 @@ class _Session:
     owner_key: str = ""
     error: object = None
     record: dict = None
+    marker: str = field(default_factory=lambda: "[client messages " + uuid.uuid4().hex[:12] + "]")
     started: float = field(default_factory=time.monotonic)
 
 
@@ -287,18 +304,24 @@ class NativeSDKBackend(SDKBackend):
         if session.error or any(session.calls[call_id].future.done() for call_id in session.published_ids):
             raise InvalidRequest("Pending tool results have already been consumed or expired", code="pending_results_consumed")
         policy_changed = policy != session.policy
-        if history_changed or policy_changed or len(outputs) != len(tail):
-            # Python's pending callback result has no separate user-message
-            # channel. Retire this paused run before a cold reconstruction so
-            # extra context is preserved and completed tools are replayed.
+        context = [item for item in tail if item.get("type") != "function_call_output"]
+        if history_changed or policy_changed or any(item.get("role") != "user" for item in context):
+            # A pending callback result has no separate message channel. User
+            # messages ride in the last result under the run's marker; other
+            # roles need a cold reconstruction that replays completed tools.
             reason = ("tool_continuation_history_changed" if history_changed else
                       "tool_continuation_policy_changed" if policy_changed else "tool_results_with_new_context")
             return await self._rebuild_continuation(session, body, history, on_event, reason)
+        delivered = {call_id: _tool_result(output) for call_id, output in results.items()}
+        if context:
+            delivered[outputs[-1]["call_id"]]["content"] += _client_messages(session.marker, context)
         session.history, session.body = copy.deepcopy(history), body
         session.on_event, session.stats = on_event, REQUEST_STATS.get()
         if session.stats is None:
             session.stats = {}
         session.stats.update(engine="native", reuse_mode="tool_continuation", queue_s=0)
+        if context:
+            session.stats["context_messages"] = len(context)
         session.boundary = asyncio.get_running_loop().create_future()
         session.text, session.published, session.owner_key = "", False, ""
         calls = {call_id: session.calls.pop(call_id) for call_id in session.published_ids}
@@ -311,9 +334,10 @@ class NativeSDKBackend(SDKBackend):
         else:
             session.scope.reschedule(asyncio.get_running_loop().time() + self.deadline(session.model))
         session.record["started"] = session.record["last"] = time.monotonic()
+        self._unpark(session.record)
         for public_id, call in calls.items():
             self._by_call.pop(public_id, None)
-            call.future.set_result(_tool_result(results[public_id]))
+            call.future.set_result(delivered[public_id])
         if session.calls:
             # SDK callback requests can arrive after the previous batch's
             # HTTP response closed. They belong to the next public boundary.
@@ -413,6 +437,7 @@ class NativeSDKBackend(SDKBackend):
         session.published = True
         if not terminal:
             session.scope.reschedule(None)
+            self._park(session.record)
         session.boundary.set_result(GeneratedText(json.dumps({"output": output}, ensure_ascii=False), token))
         self._prune()
 
@@ -484,7 +509,8 @@ class NativeSDKBackend(SDKBackend):
                             reason = "lost_pending_recovery"
                 session.agent_id = agent.agent_id
                 prompt, images = native_prompt(session.body, new_history, continuation=parent is not None,
-                                               recovery=not parent and session.recovery)
+                                               recovery=not parent and session.recovery,
+                                               context_marker=session.marker if tools else None)
                 session.stats.update(reuse_mode="resume" if parent else "cold", reuse_reason=reason,
                                      send_chars=len(prompt), resumed=parent is not None)
                 def observe(event):

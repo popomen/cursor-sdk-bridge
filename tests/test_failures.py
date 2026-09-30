@@ -17,7 +17,7 @@ from cursor_sdk_bridge.failures import (DeadlineExpired, InvalidRequest, Isolati
                       error_code, failure_label)
 from cursor_sdk_bridge.request_log import REQUEST_STATS, RequestLog
 from cursor_sdk_bridge.responses_protocol import FORMAT_REMINDER, prepare_request, request_payload
-from cursor_sdk_bridge.sdk_backend import SDKBackend
+from cursor_sdk_bridge.sdk_backend import SDKBackend, Slots
 from test_cursor_sdk2api import MODEL, StubSDK
 from test_sdk_backend import StubClient
 
@@ -257,7 +257,7 @@ class BackendFailureTests(unittest.IsolatedAsyncioTestCase):
             await self.backend.generate("claude-opus-5-5-high", "prompt")
 
     async def test_queue_wait_does_not_consume_inference_deadline(self):
-        self.backend.max_concurrency, self.backend.slots = 1, asyncio.Semaphore(1)
+        self.backend.max_concurrency, self.backend.slots = 1, Slots(1)
         self.backend.timeouts["high"] = 0.5
         async def slow_events():
             await asyncio.sleep(0.3)
@@ -276,7 +276,7 @@ class BackendFailureTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_queue_timeout_label(self):
         self.backend.queue_timeout = 0.05
-        self.backend.slots = asyncio.Semaphore(0)
+        self.backend.slots = Slots(0)
         with self.assertRaises(QueueTimeout):
             await self.backend.generate("claude-opus-5-5-xhigh", "prompt")
 

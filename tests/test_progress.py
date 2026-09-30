@@ -9,7 +9,7 @@ import unittest
 
 from cursor_sdk_bridge.cursor_sdk2api import Service, make_server
 from cursor_sdk_bridge.failures import DeadlineExpired, QueueTimeout
-from cursor_sdk_bridge.sdk_backend import SDKBackend
+from cursor_sdk_bridge.sdk_backend import SDKBackend, Slots
 from cursor_sdk_bridge.switch_config import service_report
 from test_cursor_sdk2api import StubSDK
 from test_sdk_backend import StubClient
@@ -82,7 +82,7 @@ class BackendProgressTests(unittest.IsolatedAsyncioTestCase):
             await self.backend.generate("claude-opus-5-5-high", "prompt")
         self.assertEqual(self.backend.progress(), IDLE)
         self.backend.queue_timeout = 0.05
-        self.backend.slots = asyncio.Semaphore(0)
+        self.backend.slots = Slots(0)
         with self.assertRaises(QueueTimeout):
             await self.backend.generate(MAX, "prompt")
         self.assertEqual(self.backend.progress(), IDLE)

@@ -22,7 +22,8 @@ SERVICE_MODELS = list(MODEL_SPECS)
 # Claude Code plans a 200k window for claude-* names it does not know; [1m] makes it plan for 1M. It strips
 # the suffix and adds the 1M context beta header before sending, so the adapter still receives SERVICE_MODELS.
 MODELS = [claude_model(model) for model in SERVICE_MODELS]
-MAIN, FAST = MODELS[2], MODELS[0]
+# The Haiku slot runs Claude Code's background calls, such as titles and summaries.
+MAIN, FAST = MODELS[2], claude_model("claude-opus-5-5-low-fast")
 DEFAULT_PORT = 8790
 LOCAL_TOKEN = "cursor-sdk2api-local"
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
@@ -33,11 +34,14 @@ API_TIMEOUT_MS = str((REQUEST_BOUND_S + 270) * 1000)
 # Claude Code's event watchdog aborted a pinged 700 s stream at 600 s; outlast the adapter's own bound.
 STREAM_IDLE_TIMEOUT_MS = str((REQUEST_BOUND_S + 30) * 1000)
 MAX_RETRIES = "2"
+# Claude Code compacts about 33k tokens below this window. At the adapter's 2.3 bytes per token that is
+# about 1.64 MB, which leaves about 250 KB of tool results under the CLI's 1.9 MB 1m prompt limit.
+AUTO_COMPACT_WINDOW = "750000"
 ENV_KEYS = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
             "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
             "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL", "API_TIMEOUT_MS",
             "CLAUDE_CODE_MAX_RETRIES", "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
-            "CLAUDE_STREAM_IDLE_TIMEOUT_MS", "NO_PROXY", "no_proxy")
+            "CLAUDE_STREAM_IDLE_TIMEOUT_MS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "NO_PROXY", "no_proxy")
 MANAGED = [("env", name) for name in ENV_KEYS] + [("model",), ("availableModels",)]
 MODEL_KEYS = ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
               "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL")
@@ -68,10 +72,15 @@ def installed_versions(state):
     return [state["installed"]] + ([state["previous_installed"]] if "previous_installed" in state else [])
 
 
+def agrees(current, recorded, skip=()):
+    # State saved before a key became managed does not record that key, so it is not compared.
+    return all(current.get(key) == value for key, value in recorded.items() if key not in skip)
+
+
 def matches(current, recorded):
     # Claude Code's /model writes the chosen tier back to the top-level model; a Cursor tier there, or none,
     # is the user's choice rather than an external provider change.
-    if any(current.get(key) != recorded.get(key) for key in set(current) | set(recorded) if key != "model"):
+    if not agrees(current, recorded, skip=("model",)):
         return False
     model = current.get("model", {"present": False})
     return model == recorded.get("model") or not model["present"] or model["value"] in MODELS + SERVICE_MODELS
@@ -110,6 +119,7 @@ def cursor_values(settings, port):
                    ("env", "ANTHROPIC_AUTH_TOKEN"): LOCAL_TOKEN, ("env", "API_TIMEOUT_MS"): API_TIMEOUT_MS,
                    ("env", "CLAUDE_STREAM_IDLE_TIMEOUT_MS"): STREAM_IDLE_TIMEOUT_MS,
                    ("env", "CLAUDE_CODE_MAX_RETRIES"): MAX_RETRIES,
+                   ("env", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"): AUTO_COMPACT_WINDOW,
                    # Otherwise a stream error is retried as a non-streaming request: another full inference.
                    ("env", "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK"): "1",
                    ("env", "NO_PROXY"): with_local_hosts(env.get("NO_PROXY")),
@@ -224,7 +234,7 @@ def switch(settings_path, state_path, mode, port=DEFAULT_PORT, probe_effort="hig
     with locked(state_path):
         raw, settings = read_settings(settings_path)
         current, state = managed(settings), load_state(state_path)
-        if state is not None and current == state["original"] and current != state["installed"]:
+        if state is not None and agrees(current, state["original"]) and not agrees(current, state["installed"]):
             # The backup was saved but settings.json was never switched.
             state_path.unlink()
             state = None
@@ -236,7 +246,8 @@ def switch(settings_path, state_path, mode, port=DEFAULT_PORT, probe_effort="hig
                 raise SwitchConflict("Claude Code provider settings changed after the Cursor switch; nothing was "
                                      "restored. Reconcile them with the backup by hand.")
             for path in MANAGED:
-                assign(settings, path, state["original"][".".join(path)])
+                if ".".join(path) in state["original"]:
+                    assign(settings, path, state["original"][".".join(path)])
             if state.get("env_created") and not settings.get("env"):
                 settings.pop("env", None)
             atomic_write(settings_path, dump(settings), file_mode)
@@ -253,7 +264,10 @@ def switch(settings_path, state_path, mode, port=DEFAULT_PORT, probe_effort="hig
             if updated == current:
                 return "unchanged"
             if updated != state["installed"]:
-                save_state(state_path, {**state, "installed": updated, "previous_installed": current})
+                # Keys managed since the backup keep their pre-update values for restore.
+                original = {**current, **state["original"]}
+                save_state(state_path, {**state, "original": original, "installed": updated,
+                                        "previous_installed": current})
             atomic_write(settings_path, dump(settings), file_mode)
             return "updated"
         verify_service(port)
@@ -273,7 +287,7 @@ def status(settings_path, state_path, port=DEFAULT_PORT):
     settings_path, state_path = Path(settings_path).expanduser(), Path(state_path).expanduser()
     _, settings = read_settings(settings_path)
     current, state = managed(settings), load_state(state_path)
-    if state is None or current == state["original"]:
+    if state is None or agrees(current, state["original"]):
         provider = "original"
     elif is_installed(current, state):
         provider = "cursor"
