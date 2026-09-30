@@ -1,0 +1,63 @@
+{
+  "recorded_at": "2026-09-30T12:30:16+08:00",
+  "scope": "Claude Code adapter (8790) default concurrency 3 -> 8; request admission 8 -> 16. Codex (8789) keeps 3.",
+  "release": "5a36144a2edb3dd71e2687d9853bf46c2a9c95df",
+  "before": {
+    "max_concurrency": 3,
+    "admission": 8,
+    "request_log_window": [
+      "2026-09-25T22:29:50+08:00",
+      "2026-09-30T12:20:58+08:00"
+    ],
+    "http_outcomes": {
+      "completed": 1168,
+      "client_disconnected": 39,
+      "prompt_too_large": 8,
+      "deadline_expired": 4,
+      "upstream_incomplete": 4,
+      "invalid_model_output": 1,
+      "upstream_error:InvalidRequest": 1,
+      "invalid_request": 1,
+      "queue_full": 0
+    },
+    "max_queue_s": 1389.4
+  },
+  "change": {
+    "claude_default": "--max-concurrency 8 unless CURSOR_FALLBACK_MAX_CONCURRENCY is set; an explicit flag still wins",
+    "codex_default": 3,
+    "max_concurrency": 8,
+    "max_admission": 16,
+    "reason": "admission equalled the concurrency cap, so at 8 every further request would get 429 queue_full instead of queuing"
+  },
+  "verification": {
+    "unit_tests_passed": 361,
+    "smoke": {
+      "state_dir": "temporary, no key",
+      "sdk_calls": 0,
+      "running_version": "5a36144a2edb3dd71e2687d9853bf46c2a9c95df",
+      "claude": {
+        "port": 18799,
+        "mode": "native",
+        "max_concurrency": 8,
+        "queue_timeout": 1800.0,
+        "prompt_limits": {
+          "1m": 1900000,
+          "300k": 500000
+        },
+        "models": 20
+      },
+      "codex": {
+        "port": 18798,
+        "mode": "native",
+        "max_concurrency": 3,
+        "models": 20
+      }
+    },
+    "deploy": {
+      "current": "5a36144a2edb3dd71e2687d9853bf46c2a9c95df",
+      "units_enabled": true,
+      "dashboard_restarted_at": "2026-09-30T12:27:17+08:00",
+      "claude_restart": "pending: user unit csb-gate-5a36144 restarts 8790 without --force once it has no work and no connections, then runs switch claude cursor"
+    }
+  }
+}
