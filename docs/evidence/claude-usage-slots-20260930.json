@@ -85,5 +85,78 @@
       "units_enabled": true,
       "dashboard_restarted_at": "2026-09-30T11:59:03+08:00"
     }
+  },
+  "acceptance": {
+    "recorded_at": "2026-09-30T15:16:36+08:00",
+    "shipped_in": "5a36144a2edb3dd71e2687d9853bf46c2a9c95df (contains fab5c1a); the fab5c1a deploy in verification.deploy was superseded before 8790 restarted",
+    "restart": {
+      "at": "2026-09-30T15:12:53+08:00",
+      "command": "cursor-sdk-bridge restart claude (gate, no --force)",
+      "result": "restarted",
+      "running_version": "5a36144a2edb3dd71e2687d9853bf46c2a9c95df",
+      "version_match": true
+    },
+    "reported_usage": {
+      "http_records_with_reported_usage": "2 of 2 probe requests",
+      "input_estimate_check": [
+        {
+          "prompt_bytes": 1756,
+          "reported": 3764,
+          "expected": 3764
+        },
+        {
+          "prompt_bytes": 2007,
+          "reported": 3873,
+          "expected": 3873
+        }
+      ],
+      "sdk_usage": "only the second run reported SDK usage; the first run was replaced by the policy-changed continuation before it finished, and the SDK reports usage once per completed run",
+      "probe_requests": [
+        {
+          "ts": "2026-09-30T15:15:07+08:00",
+          "outcome": "completed",
+          "duration_s": 27.689,
+          "queue_s": 0.0,
+          "reuse_reason": "no_direct_successor",
+          "prompt_bytes": 1756,
+          "reported_usage": {
+            "input_tokens": 3764,
+            "output_tokens": 29
+          }
+        },
+        {
+          "ts": "2026-09-30T15:15:32+08:00",
+          "outcome": "completed",
+          "duration_s": 25.325,
+          "queue_s": 0.0,
+          "reuse_reason": "tool_continuation_policy_changed",
+          "prompt_bytes": 2007,
+          "usage": {
+            "input_tokens": 3391,
+            "output_tokens": 26,
+            "cache_read_tokens": 2374,
+            "cache_write_tokens": 1013
+          },
+          "reported_usage": {
+            "input_tokens": 3873,
+            "output_tokens": 14
+          },
+          "note": "same reuse reason as the second probe call in tool-roundtrips-20260926.json"
+        }
+      ]
+    },
+    "claude_settings_after_switch": {
+      "model": "claude-opus-5-5-max-fast[1m]",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5-max[1m]",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-opus-5-5-max[1m]",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-opus-5-5-low-fast[1m]",
+      "CLAUDE_CODE_SUBAGENT_MODEL": "claude-opus-5-5-max[1m]",
+      "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "750000",
+      "switch_exit": 0,
+      "switch_sdk_calls": 0,
+      "backup_original_auto_compact_window": "absent, so switch claude restore removes it",
+      "applies_to": "new Claude Code sessions and claude --resume"
+    },
+    "not_yet_observed": "orphan_cancelled, tool-wait slot release, context_messages hand-off and auto-compaction under real Claude Code traffic"
   }
 }
