@@ -1,0 +1,89 @@
+{
+  "recorded_at": "2026-09-30T12:10:40+08:00",
+  "scope": "Metadata only: request-log fields, SDK local-store event types and counts, and constants read from the Claude Code 2.1.285 binary. No prompts, outputs, tool results or credentials.",
+  "release": "fab5c1ab4ae8b410482e44e58befc77da1104a71",
+  "before": {
+    "window": "Claude instance request log, 2026-09-25T22:29 to 2026-09-30T09:54 +08:00",
+    "completed_responses": 899,
+    "tool_use_responses_with_zero_usage": 613,
+    "final_usage_over_prompt_max": 4.1,
+    "cold_rebuilds_for_context_after_tool_results": {
+      "count": 158,
+      "median_s": 278,
+      "total_h": 16.0
+    },
+    "haiku_slot_requests": {
+      "model": "claude-opus-5-5-high[1m]",
+      "count": 144,
+      "median_s": 45,
+      "max_s": 900
+    },
+    "slot_hours_awaiting_tool_results": 3.7,
+    "queue_wait_max_s": 1624,
+    "queue_timeouts": 2
+  },
+  "sdk_usage_timing": {
+    "source": "SDK local store of the Claude instance, latest 400 runs, event types only",
+    "runs_without_tool_calls": {
+      "with_usage": 180,
+      "without_usage": 7
+    },
+    "runs_with_tool_calls": {
+      "with_usage": 45,
+      "without_usage": 168
+    },
+    "usage_messages_per_run_max": 1,
+    "finding": "The SDK emits one usage message per run, at turn end after all of its tool calls, summed over every model call of the run. A run paused for client tool results has none, so a tool-use response cannot carry real usage."
+  },
+  "calibration": {
+    "source": "176 completed cold Messages requests with SDK usage",
+    "fit_bytes_per_sdk_token": 2.18,
+    "estimate": "prompt_bytes / 2.3 + 3000 preamble + 1600 per image, shared with count_tokens and prompt_too_large"
+  },
+  "claude_code_2_1_285": {
+    "window_for_1m_suffix": 1000000,
+    "window_for_bare_id": "CLAUDE_CODE_MAX_CONTEXT_TOKENS when set, else 200000",
+    "auto_compact_window": "CLAUDE_CODE_AUTO_COMPACT_WINDOW, clamped to the model window",
+    "compacts_at": "window - min(max output tokens, 20000) - 13000",
+    "background_summary_from": "0.8 x (window - 20000) by default",
+    "gateway_model_discovery_fields": [
+      "id",
+      "display_name",
+      "description"
+    ]
+  },
+  "change": {
+    "reported_usage": "Each response reports the estimate for its own prompt and output. The request log keeps SDK usage in usage and adds reported_usage.",
+    "auto_compact_window": {
+      "value": 750000,
+      "compacts_at_estimated_tokens": 717000,
+      "background_summary_from_estimated_tokens": 584000,
+      "compacts_at_prompt_bytes": 1642200,
+      "headroom_bytes_under_1m_limit": 257800
+    },
+    "haiku_slot": "claude-opus-5-5-low-fast[1m]",
+    "context_after_tool_results": "User messages ride in the last tool result under a per-run marker and the paused run continues; system, developer and assistant messages still rebuild.",
+    "slots": "A run awaiting tool results releases its slot and retakes one on resume, even above the limit; new requests wait until inference drops below it.",
+    "orphan_queued_jobs": "Cancelled after 30 s without a waiting request and logged as orphan_cancelled; started inference always finishes."
+  },
+  "verification": {
+    "unit_tests_passed": 360,
+    "smoke": {
+      "port": 18799,
+      "state_dir": "temporary, no key",
+      "running_version": "fab5c1ab4ae8b410482e44e58befc77da1104a71",
+      "mode": "native",
+      "prompt_limits": {
+        "1m": 1900000,
+        "300k": 500000
+      },
+      "models": 20,
+      "sdk_calls": 0
+    },
+    "deploy": {
+      "current": "fab5c1ab4ae8b410482e44e58befc77da1104a71",
+      "units_enabled": true,
+      "dashboard_restarted_at": "2026-09-30T11:59:03+08:00"
+    }
+  }
+}
