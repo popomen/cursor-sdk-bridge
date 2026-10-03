@@ -1,5 +1,7 @@
 # cursor-sdk-bridge
 
+![Cursor SDK Bridge architecture: clients, API ports, model providers, and dashboard](docs/images/architecture.png)
+
 Cursor SDK Bridge exposes OpenAI Responses and Anthropic Messages through Cursor SDK. A separate TraeX Astra Responses service supports Codex. It includes three-way Codex and two-way Claude Code provider switching, a metadata dashboard, probes, and versioned deployment. Runtime state and credentials remain in their existing locations.
 
 The command is `cursor-sdk-bridge`; the Python package is `cursor_sdk_bridge`.
