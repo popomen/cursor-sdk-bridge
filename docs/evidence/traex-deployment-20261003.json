@@ -1,0 +1,25 @@
+{
+  "kind": "traex_deployment_acceptance",
+  "date": "2026-10-03",
+  "release": "e374597cffc4e50f1556e09a6cdad2e8b9327c61",
+  "traex_port": 8792,
+  "dashboard_port": 8791,
+  "model_ids": [
+    "GPT-6-Astra",
+    "GPT-6-Astra[1m]"
+  ],
+  "checks": {
+    "unauthenticated_catalog_rejected": true,
+    "traex_healthy_idle": true,
+    "traex_version_matches_release": true,
+    "dashboard_lists_three_instances": true,
+    "dashboard_renders_traex": true,
+    "quota_available": true,
+    "openai_config_unchanged": true,
+    "cursor_and_claude_pids_unchanged": true,
+    "codex_runtime_matches_config": true
+  },
+  "current_codex_provider": "openai",
+  "provider_switch_deferred_to_independent_ssh": true,
+  "production_inference_calls": 0
+}
