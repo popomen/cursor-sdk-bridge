@@ -22,7 +22,8 @@ CATALOG_PATH_UPGRADE = (
 MANAGED = [(key,) for key in ("model", "model_provider", "model_catalog_json", "model_reasoning_effort",
                              "web_search")]
 MANAGED += [("features", "code_mode"), ("features", "code_mode_only"),
-            ("features", "enable_request_compression"), ("model_providers", "cursor")]
+            ("features", "enable_request_compression"), ("model_providers", "cursor"), ("model_providers", "traex"),
+            ("model_context_window",), ("model_auto_compact_token_limit",)]
 
 
 class ServiceNotReady(ValueError):
@@ -105,10 +106,15 @@ def matches_installed(document, state):
     # external-provider conflict. The saved OpenAI baseline remains unchanged.
     effort = document.get("model_reasoning_effort")
     model = MODELS.get(document.get("model"))
-    if model is not None and effort == model.effort:
+    if document.get("model_provider") == "cursor" and model is not None and effort == model.effort:
         for name in ("model", "model_reasoning_effort"):
             actual[name] = state["installed"][name]
-    return actual == {name: value for name, value in state["installed"].items() if name in actual}
+    if document.get("model_provider") == "traex":
+        supported = state.get("traex_models", {}).get(document.get("model"), [])
+        if effort in supported:
+            for name in ("model", "model_reasoning_effort"):
+                actual[name] = state["installed"][name]
+    return all(actual.get(name) == value for name, value in state["installed"].items() if name in actual)
 
 
 def assign(document, path, source):
@@ -133,17 +139,17 @@ def write_state(path, state):
 
 
 def retain_cursor_provider(document, baseline, state):
-    """Keep the bridge definition available to threads already bound to Cursor."""
-    path = ("model_providers", "cursor")
-    if get(baseline, path)["present"] or get(document, path)["present"]:
-        return False
-    source = state["installed"].get("model_providers.cursor", {"present": False})
-    if not source["present"]:
-        return False
-    # The current document can already be the restored baseline after a legacy
-    # interruption. The installed snapshot still owns the missing definition.
-    assign(document, path, source)
-    return True
+    """Keep bridge definitions available to threads already bound to either provider."""
+    changed = False
+    for provider in ("cursor", "traex"):
+        path = ("model_providers", provider)
+        if get(baseline, path)["present"] or get(document, path)["present"]:
+            continue
+        source = state["installed"].get("model_providers." + provider, {"present": False})
+        if source["present"]:
+            assign(document, path, source)
+            changed = True
+    return changed
 
 
 def finish_transaction(directory, state_path, state, expected_state=None):
@@ -221,6 +227,10 @@ def catalog_path_upgrade_required(config):
 def switch(directory, mode, port=8789, prepared=None):
     import tomlkit
     directory = Path(directory).expanduser()
+    existing = json.loads(read(directory / "cursor-fallback-state/state.json") or b"{}")
+    if mode == "traex" or existing.get("version") == 3:
+        from cursor_sdk_bridge.provider_switch import switch_multi
+        return switch_multi(directory, mode, port, prepared=prepared)
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError("codex directory must be an existing real directory")
     state_dir = directory / "cursor-fallback-state"
@@ -337,7 +347,10 @@ def switch(directory, mode, port=8789, prepared=None):
                     "wire_api": "responses", "supports_websockets": False, "requires_openai_auth": False},
             }
             for path in MANAGED:
-                assign(document, path, {"present": True, "value": values[".".join(path)]})
+                name = ".".join(path)
+                if path == ("model_providers", "traex"):
+                    continue
+                assign(document, path, {"present": True, "value": values[name]} if name in values else {"present": False})
             state = {"version": 2, "original_config": encode(config),
                      "installed": managed(document)}
             new_config = tomlkit.dumps(document).encode()
@@ -369,7 +382,7 @@ def status(directory):
     upgrade = catalog_path_upgrade_required(config)
     report = {"provider": config.get("model_provider", "openai"), "model": config.get("model"),
             "model_catalog_json": config.get("model_catalog_json"),
-            "expected_model_catalog_json": str(ROOT / "assets/models.json"),
+            "expected_model_catalog_json": config.get("model_catalog_json") if config.get("model_provider") == "traex" else str(ROOT / "assets/models.json"),
             "catalog_path_upgrade_required": upgrade,
             "auth_file_present": read(directory / "auth.json") is not None,
             "openai_config_backup_present": bool(pending), "auth_policy": "preserved",
@@ -383,12 +396,14 @@ def status(directory):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("openai", "cursor", "status"))
+    parser.add_argument("command", choices=("openai", "cursor", "traex", "status"))
     parser.add_argument("--codex-dir", type=Path, default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
-    parser.add_argument("--port", type=int, default=8789)
+    parser.add_argument("--port", type=int)
     parser.add_argument("--restart-daemon", action="store_true",
                         help="verify no Desktop proxy/active tasks, then restart the exact Unix socket owner")
     args = parser.parse_args()
+    if args.port is None:
+        args.port = 8792 if args.command == "traex" else 8789
     try:
         if args.command != "status":
             from cursor_sdk_bridge.runtime_switch import apply_mode
@@ -407,7 +422,15 @@ def main():
         except Exception as exc:
             result["runtime"] = {"state": "unverified", "error_type": type(exc).__name__}
             result["runtime_matches_config"] = False
-        result["service"] = service_report(args.port)
+        if result["provider"] == "traex":
+            from cursor_sdk_bridge import traex
+            try:
+                health = traex.request('/health', args.port if args.command == 'traex' else traex.PORT)
+                result['service'] = {k: health.get(k) for k in ('service', 'status', 'running_version')}
+            except Exception as exc:
+                result['service'] = {'state': 'unreachable', 'error_type': type(exc).__name__}
+        else:
+            result["service"] = service_report(args.port)
         if result["provider"] == "cursor" and not result["service"].get("image_inputs"):
             result["service"]["next_step"] = ("Run cursor-sdk-bridge restart codex when idle so the service "
                                               "uses the image-capable adapter.")

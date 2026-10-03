@@ -16,7 +16,7 @@ import urllib.request
 
 from cursor_sdk_bridge import version
 
-INSTANCES = ('codex', 'claude', 'dashboard')
+INSTANCES = ('codex', 'claude', 'traex', 'dashboard')
 MANAGED = '# Managed by cursor-sdk-bridge.\n'
 
 
@@ -127,6 +127,12 @@ def install_release(repo, commit, root, runner=command, extractor=extract_commit
         extractor(repo, resolved, release)
         if not (release / 'pyproject.toml').is_file() or not (release / 'cursor_sdk_bridge/cli.py').is_file():
             raise DeploymentError('Commit is not a cursor-sdk-bridge release')
+        traex_source = release / 'integrations/traex'
+        if (traex_source / 'package-lock.json').is_file():
+            runner(['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'], cwd=traex_source, timeout=600)
+            runner(['npm', 'run', 'build:bridge'], cwd=traex_source, timeout=120)
+            if not (release / 'cursor_sdk_bridge/assets/traex/server.mjs').is_file():
+                raise DeploymentError('TraeX build did not produce its service bundle')
         runner([sys.executable, '-m', 'venv', release / 'venv'], timeout=120)
         python = release / 'venv/bin/python'
         runner([python, '-m', 'pip', 'install', '--disable-pip-version-check', release], timeout=600)
@@ -212,8 +218,12 @@ def admin_request(port, action):
     path = {'drain': 'drain', 'resume': 'resume', 'force-drain': 'drain?force=1'}.get(action)
     if path is None:
         raise DeploymentError('Unknown administration action')
+    headers = {'Content-Type': 'application/json', 'Connection': 'close'}
+    from cursor_sdk_bridge import traex
+    if port == traex.PORT:
+        headers['Authorization'] = 'Bearer ' + traex.KEY_FILE.read_text().strip()
     request = urllib.request.Request('http://127.0.0.1:%d/admin/%s' % (port, path), data=b'{}',
-                                     headers={'Content-Type': 'application/json', 'Connection': 'close'}, method='POST')
+                                     headers=headers, method='POST')
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(request, timeout=5) as response:

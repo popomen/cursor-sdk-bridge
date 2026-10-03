@@ -1,0 +1,30 @@
+{
+  "name": "traex-bridge",
+  "version": "0.6.4",
+  "description": "Expose Trae models as OpenAI (Chat Completions + Responses) and Anthropic (Messages) compatible APIs",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "build": "esbuild src/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.js --banner:js=\"import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);\"",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:ts",
+    "test:ts": "tsx --test tests/*.test.ts tests/**/*.test.ts",
+    "build:bridge": "esbuild src/bridge-server.ts --bundle --platform=node --target=node22 --format=esm --outfile=../../cursor_sdk_bridge/assets/traex/server.mjs --banner:js=\"import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);\""
+  },
+  "dependencies": {
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.28.1",
+    "openai": "^6.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

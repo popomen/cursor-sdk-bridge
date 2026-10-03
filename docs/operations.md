@@ -102,3 +102,30 @@ A probe consumes one or two real SDK outputs; high effort typically takes one to
 `prompt_too_large` rejects a prompt before it reaches the SDK. Messages returns HTTP 400 `prompt is too long: N tokens > M maximum`; Responses returns `context_length_exceeded`. The global limit is 3 MiB of rendered prompt. The Claude instance also limits 1m-context models to 1,900,000 bytes and 300k-context models to 500,000 bytes. Claude Code history averages about 2.1 bytes per SDK token, so a 2.1 MB prompt already fills the 1M window: each cold run then re-sends the prompt after its tool-schema lookup until the 1800 s deadline, and Claude Code reports `Server error mid-response`. Each response reports usage in the same estimated tokens as this error, and the managed `CLAUDE_CODE_AUTO_COMPACT_WINDOW=750000` makes Claude Code 2.1.285 compact a 1m session at about 717k estimated tokens, roughly 1.64 MB of prompt; it may start summarizing in the background from about 584k. That leaves about 250 KB for the next tool results and for the compaction request itself. The 400 remains the fallback: Claude Code 2.1.284 then retried a prompt-too-long compaction with shorter histories until it fit; compacting a 1.9 MB history at max effort took about 8.5 minutes. A 300k variant compacts at the smaller of this window and the window Claude Code plans for its bare ID. By default that window is 200k, which compacts before the 500,000-byte limit; `CLAUDE_CODE_MAX_CONTEXT_TOKENS` can raise it, and such sessions still compact through the 400. A rejected tool-result continuation also cancels the paused run it would have resumed. `/health.prompt_limits` reports the effective limit for each context window.
 
 For an application rollback, deploy a known-good commit, then restart each idle adapter with the guarded command. Keep the same state paths. For a behavior rollback, start an instance with `--mode legacy` after the same idle checks. Provider restore commands restore the original managed client settings; they do not migrate existing conversations. A failed deployment restores previous unit file contents and the prior `current` link; it does not restart running processes.
+
+## TraeX service and three-provider switching
+
+TraeX integration is described in the README's **TraeX Astra service** section. Its managed unit is
+`cursor-sdk-bridge-traex.service`, its loopback port is 8792, and metadata logs are under
+`~/.codex/traex-bridge/logs`. The credential and API-key directory remains `~/.traex-bridge`.
+The separately installed `traex-bridge.service` and its checkout are not modified or started by deployment.
+
+The CLI accepts `switch codex openai|cursor|traex --restart-daemon`; `restore` aliases `openai`.
+Run these from an independent SSH terminal after disconnecting Desktop and finishing tasks.
+First entering TraeX upgrades clean v2 switch state to v3 without replacing the original OpenAI baseline.
+Both custom provider definitions are retained when restoring OpenAI. Configuration/runtime rollback still
+uses the existing journal; immutable, content-addressed catalog files need no rollback write.
+
+Astra's exact IDs and reasoning options come from the live catalog. Codex also needs a filtered startup
+catalog to avoid merging in its bundled models. The catalog snapshots contain model metadata only and live
+under `~/.codex/cursor-fallback-state/traex-catalogs/`; do not remove referenced snapshots.
+
+TraeX's HTTP responses are stateless. On client disconnect the upstream is aborted, and unfinished counts
+remain nonzero until cleanup completes. Queued work also blocks restart. The same drain, connection and
+expected-release checks as the Cursor services protect `restart traex`. The default local request cap is 8.
+Metadata captures one inference record and one HTTP record per admitted generation, with cumulative usage
+counted once. No request bodies, tools, model output, authentication headers or raw upstream errors are logged.
+
+Deployment builds `integrations/traex` with Node >=22 and its pinned npm lockfile before installing the Python
+package; build failures leave the selected release untouched. `deploy --install-only` does not select, register
+or start services. First startup is explicit; ordinary deploy still never restarts any service or Codex daemon.

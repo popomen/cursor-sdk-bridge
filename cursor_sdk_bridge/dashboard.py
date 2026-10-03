@@ -23,7 +23,7 @@ import tomllib
 import urllib.parse
 import urllib.request
 
-from cursor_sdk_bridge import claude_switch, deployment, version
+from cursor_sdk_bridge import claude_switch, deployment, version, traex
 
 HOME = Path.home()
 DEFAULT_PORT = 8791
@@ -35,6 +35,9 @@ INSTANCES = (
     {'name': 'claude', 'client': 'Claude Code', 'port': claude_switch.DEFAULT_PORT,
      'state_dir': HOME / '.codex/cursor-sdk2api-claude', 'unit': 'cursor-sdk-bridge-claude.service',
      'limits': {'max': claude_switch.MAX_DEADLINE_S, 'queue_timeout': claude_switch.QUEUE_TIMEOUT_S}},
+    {'name': 'traex', 'client': 'Codex / TraeX', 'port': traex.PORT, 'state_dir': traex.STATE_DIR,
+     'unit': 'cursor-sdk-bridge-traex.service', 'limits': {},
+     'capabilities': ('responses', 'namespace_functions', 'image_inputs', 'request_progress', 'drain')},
 )
 LOG_FILES = ('requests.jsonl.3', 'requests.jsonl.2', 'requests.jsonl.1', 'requests.jsonl')
 LOG_FIELDS = ('ts', 'event', 'dedup', 'api', 'model', 'stream', 'input_items', 'prompt_bytes', 'images', 'queue_s',
@@ -77,7 +80,7 @@ def fetch_health(port, timeout=2):
             health = json.load(response)
     except Exception as exc:
         return None, type(exc).__name__
-    if not isinstance(health, dict) or health.get('service') != 'cursor-sdk2api':
+    if not isinstance(health, dict) or health.get('service') not in ('cursor-sdk2api', 'traex-bridge'):
         return None, 'unexpected_service'
     return health, None
 
@@ -319,11 +322,11 @@ def describe(spec, health, error):
                   queued=progress.get('queued') if progress else None,
                   unfinished=progress.get('unfinished', health.get('unfinished')) if progress else None,
                   running_version=health.get('running_version'))
-    missing = [name for name in REQUIRED_CAPABILITIES if name not in (health.get('capabilities') or [])]
+    missing = [name for name in spec.get('capabilities', REQUIRED_CAPABILITIES) if name not in (health.get('capabilities') or [])]
     if missing or limits is None:
         notes.append('仍在运行旧版适配器代码（缺少 %s），没有进行中的请求时重启 %s 才会生效。'
                      % ('、'.join(missing + ([] if limits else ['limits'])), spec['unit']))
-    else:
+    elif spec['name'] != 'traex':
         deadlines = limits.get('deadlines') if isinstance(limits.get('deadlines'), dict) else {}
         expected = spec['limits']
         if deadlines.get('max') != expected['max'] or limits.get('queue_timeout') != expected['queue_timeout']:
@@ -340,7 +343,7 @@ def describe(spec, health, error):
             idle, running, deadline = run.get('idle_s') or 0, run.get('running_s') or 0, run.get('deadline_s')
             label = tier(run.get('model')) + ' ' if len(runs) > 1 else ''
             # A run awaiting client tool results is waiting on the client, not upstream.
-            if idle >= STALL_S and run.get('state') != 'awaiting_tool_results':
+            if idle >= STALL_S and run.get('state') not in ('awaiting_tool_results', 'queued'):
                 state = 'stalled'
                 notes.append('%s已经 %s 没有新的 SDK 事件，上游可能卡住；到时限会报 deadline_expired。' % (label, duration(idle)))
             if deadline and running >= 0.8 * deadline:
@@ -375,6 +378,8 @@ class Dashboard:
 
     def inspect(self, spec):
         health, error = self.health_reader(spec['port'])
+        if health is not None and health.get('service') != ('traex-bridge' if spec['name'] == 'traex' else 'cursor-sdk2api'):
+            health, error = None, 'unexpected_service'
         unit = self.unit_reader(spec['unit'])
         item = describe(spec, health, error)
         deployed = self.version_reader()
@@ -383,6 +388,14 @@ class Dashboard:
                     deployed_version=deployed, needs_restart=bool(deployed and deployed != running))
         if item['needs_restart'] and item['state'] != 'offline':
             item['notes'].append('运行版本 %s 与已部署版本 %s 不同，实例空闲后重启。' % (running or '未知', deployed))
+        if spec['name'] == 'traex':
+            item['quota'] = None
+            if health is not None:
+                try:
+                    usage = traex.request('/v1/usage', spec['port'], timeout=2)
+                    item['quota'] = (usage.get('quota') or {}).get('pools')
+                except Exception:
+                    pass
         item['restart_blocker'] = restart_blocker(item)
         return item
 
@@ -510,6 +523,11 @@ def card(item):
             ('已部署提交', item.get('deployed_version')), ('需要重启', item.get('needs_restart')),
             ('systemd', unit_text), ('时限', limit_text),
             ('当前推理', active_text), ('排队', item.get('queued')), ('未结束连接', item.get('connections')))
+    if item['name'] == 'traex':
+        pools = item.get('quota')
+        quota_text = '未知' if pools is None else '；'.join(
+            '%s: %s / %s' % (pool.get('name'), pool.get('used'), pool.get('limit')) for pool in pools)
+        rows += (('TraeX 额度（上游可能延迟）', quota_text),)
     table = ''.join('<tr><th>%s</th><td>%s</td></tr>' % (esc(name), esc(value)) for name, value in rows)
     notes = ''.join('<li>%s</li>' % esc(note) for note in item['notes'])
     if item.get('restart_blocker'):

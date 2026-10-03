@@ -37,7 +37,10 @@ def status():
 
 
 def serve(arguments):
-    instance = arguments.pop(0) if arguments and arguments[0] in ('codex', 'claude', 'dashboard') else 'codex'
+    instance = arguments.pop(0) if arguments and arguments[0] in ('codex', 'claude', 'traex', 'dashboard') else 'codex'
+    if instance == 'traex':
+        from cursor_sdk_bridge import traex
+        return invoke(traex, arguments)
     if instance == 'dashboard':
         from cursor_sdk_bridge import dashboard
         return invoke(dashboard, arguments)
@@ -59,16 +62,23 @@ def main(argv=None):
     parser.add_argument('command', choices=('status', 'serve', 'switch', 'restart', 'probe', 'deploy'))
     if not arguments or arguments[0] in ('-h', '--help'):
         parser.print_help()
-        print('\nserve [codex|claude|dashboard] [adapter options]\n'
-              'switch codex|claude cursor|restore [switch options]\n'
-              'restart codex|claude|dashboard [--force]\n'
-              'probe [--messages|--image] [--port PORT] [--effort EFFORT|--model MODEL_ID]\n'
+        print('\nserve [codex|claude|traex|dashboard] [adapter options]\n'
+              'switch codex openai|cursor|traex|restore [switch options]\n'
+              'switch claude cursor|restore [switch options]\n'
+              'restart codex|claude|traex|dashboard [--force]\n'
+              'probe [--traex|--messages|--image] [--port PORT] [--effort EFFORT|--model MODEL_ID]\n'
               'deploy [COMMIT] [--install-only] [--repo PATH]')
         return
     command = parser.parse_args(arguments[:1]).command
     rest = arguments[1:]
     if command == 'serve':
         return serve(rest)
+    if command == 'probe' and '--traex' in rest:
+        from cursor_sdk_bridge import probe_traex
+        rest.remove('--traex')
+        if not any(arg in ('-h', '--help') for arg in rest):
+            print('TraeX probe uses %s short Astra outputs at low effort; consumes TraeX quota.' % (1 if '--image' in rest else 2), file=sys.stderr)
+        return invoke(probe_traex, rest)
     if command == 'probe':
         from cursor_sdk_bridge import probe_service
         if not any(arg in ('-h', '--help') for arg in rest):
@@ -77,16 +87,18 @@ def main(argv=None):
     if command == 'switch':
         switch_parser = argparse.ArgumentParser(prog='cursor-sdk-bridge switch')
         switch_parser.add_argument('client', choices=('codex', 'claude'))
-        switch_parser.add_argument('mode', choices=('cursor', 'restore'))
+        switch_parser.add_argument('mode', choices=('openai', 'cursor', 'traex', 'restore'))
         selected, extra = switch_parser.parse_known_args(rest)
+        if selected.client == 'claude' and selected.mode not in ('cursor', 'restore'):
+            switch_parser.error('Claude Code supports cursor|restore only')
         if selected.client == 'codex':
             from cursor_sdk_bridge import switch_config as module
             mode = 'openai' if selected.mode == 'restore' else selected.mode
         else:
             from cursor_sdk_bridge import claude_switch as module
             mode = selected.mode
-        if mode == 'cursor' and not any(arg in ('-h', '--help') for arg in extra):
-            print('Switch preflight may use 2 real SDK outputs (usually 1–2 minutes at high).', file=sys.stderr)
+        if mode in ('cursor', 'traex') and not any(arg in ('-h', '--help') for arg in extra):
+            print('Switch preflight may use 2 real model outputs and consumes the selected provider quota.', file=sys.stderr)
         return invoke(module, [mode] + extra)
     if command == 'status':
         parser.parse_args(arguments)

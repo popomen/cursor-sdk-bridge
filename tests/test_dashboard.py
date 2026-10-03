@@ -58,7 +58,7 @@ class ExpectationTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertLessEqual(set(dashboard.REQUIRED_CAPABILITIES), set(health['capabilities']))
         self.assertIsInstance(health['limits'], dict)
-        codex, claude = dashboard.INSTANCES
+        codex, claude = dashboard.INSTANCES[:2]
         self.assertEqual((codex['port'], claude['port']), (8789, 8790))
         self.assertEqual(codex['limits'], {'max': DEFAULT_TIMEOUTS['max'], 'queue_timeout': DEFAULT_QUEUE_TIMEOUT})
         self.assertEqual(claude['limits'], {'max': claude_switch.MAX_DEADLINE_S,

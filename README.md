@@ -1,6 +1,6 @@
 # cursor-sdk-bridge
 
-Cursor SDK Bridge exposes OpenAI Responses and Anthropic Messages through Cursor SDK. It includes Codex and Claude Code provider switching, a metadata dashboard, probes, and versioned deployment. Runtime state and credentials remain in their existing locations.
+Cursor SDK Bridge exposes OpenAI Responses and Anthropic Messages through Cursor SDK. A separate TraeX Astra Responses service supports Codex. It includes three-way Codex and two-way Claude Code provider switching, a metadata dashboard, probes, and versioned deployment. Runtime state and credentials remain in their existing locations.
 
 The command is `cursor-sdk-bridge`; the Python package is `cursor_sdk_bridge`.
 
@@ -17,7 +17,7 @@ The original high/xhigh/max IDs retain their 1m, standard-speed behavior. `GET /
 
 The default `native` engine streams thinking and text, keeps SDK tool callbacks alive across HTTP turns, and resumes direct successor conversations. `--mode reuse` keeps the JSON protocol with agent reuse; `--mode legacy` restores full-history JSON inference. All modes support detached inference and durable retry deduplication. See [engine design](docs/design.md).
 
-In a checkout, use `python -m cursor_sdk_bridge` with the project's dependencies installed. `deploy` installs an exact Git commit and an independent virtual environment under `~/.local/share/cursor-sdk-bridge/<commit>`. It selects `current`, installs a command under `~/.local/bin`, and enables three regular user units. It does **not** start or restart services. `--install-only` leaves the selected release, command and units untouched for temporary-port validation. Running services use immutable release paths; editing the checkout cannot change them.
+In a checkout, use `python -m cursor_sdk_bridge` with the project's dependencies installed. `deploy` installs an exact Git commit and an independent virtual environment under `~/.local/share/cursor-sdk-bridge/<commit>`. It selects `current`, installs a command under `~/.local/bin`, and enables four regular user units. It does **not** start or restart services. `--install-only` leaves the selected release, command and units untouched for temporary-port validation. Running services use immutable release paths; editing the checkout cannot change them.
 
 The guide below covers everyday tasks. [Operations](docs/operations.md) explains deployment, restart guards, client switching, rollback and state compatibility in depth.
 
@@ -29,6 +29,7 @@ Run these commands on the machine that hosts the services. If `cursor-sdk-bridge
 | --- | --- | --- | --- |
 | Codex | 8789 | `cursor-sdk-bridge-codex.service` | `~/.codex/cursor-sdk2api/logs/requests.jsonl` |
 | Claude Code | 8790 | `cursor-sdk-bridge-claude.service` | `~/.codex/cursor-sdk2api-claude/logs/requests.jsonl` |
+| TraeX (Codex) | 8792 | `cursor-sdk-bridge-traex.service` | `~/.codex/traex-bridge/logs/requests.jsonl` |
 | Dashboard | 8791 | `cursor-sdk-bridge-dashboard.service` | none |
 
 ### Check status and open the dashboard
@@ -107,7 +108,7 @@ cursor-sdk-bridge switch claude restore   # new sessions use the original provid
 - Only new `claude` sessions change; running sessions keep their provider. Start a new session to verify.
 - The backup `~/.codex/cursor-fallback-state/claude-code.json` contains the original credentials. Do not print or edit it.
 
-### Switch Codex between OpenAI and Cursor
+### Switch Codex between OpenAI, Cursor and TraeX
 
 The switch restarts the Codex daemon, so run it yourself from an independent SSH terminal, never from a Codex task.
 
@@ -115,7 +116,8 @@ The switch restarts the Codex daemon, so run it yourself from an independent SSH
 2. Run one of these. If a task is still running, the command does not restart the daemon; finish the task and run it again.
 
    ```sh
-   cursor-sdk-bridge switch codex restore --restart-daemon   # back to the original (OpenAI) provider
+   cursor-sdk-bridge switch codex traex --restart-daemon     # Astra through 8792
+   cursor-sdk-bridge switch codex openai --restart-daemon   # back to the original (OpenAI) provider
    cursor-sdk-bridge switch codex cursor --restart-daemon    # to Cursor through 8789
    ```
 
@@ -124,9 +126,44 @@ The switch restarts the Codex daemon, so run it yourself from an independent SSH
 
 After a switch:
 
-- Existing tasks keep their provider. Old Cursor tasks still go through 8789, so keep the bridge running after restoring OpenAI.
+- Existing tasks keep their provider. Old Cursor and TraeX tasks continue using their respective services, so keep those services running after restoring OpenAI. `restore` remains an alias for `openai`.
 - Changing the model inside an existing task does not change its provider and fails with `model is not supported when using Codex with a ChatGPT account`. Create a new task instead.
 - Keep `~/.codex/auth.json`.
+
+### TraeX Astra service
+
+`cursor-sdk-bridge serve traex` runs the pinned TraeX protocol core on `127.0.0.1:8792`.
+It exposes Responses and model metadata, with only `GPT-6-Astra` and `GPT-6-Astra[1m]`.
+New TraeX configurations default to Astra 1m at medium effort; current catalog efforts are low, medium,
+high and xhigh. Unknown models fail without fallback. Claude Code settings are independent.
+
+The managed service always requires the existing `~/.traex-bridge/api-key`, including on loopback.
+Codex reads that file through its provider `auth.command`; no shell export is needed. Trae credentials
+are obtained using the reference project's SSH/git mechanism, or its configured token file/command.
+The original credential directory and standalone TraeX unit are preserved. Metadata logs use a separate directory.
+
+Codex merges a remote catalog with its bundled models. To show only Astra, switching creates an immutable
+catalog snapshot from the live metadata under `~/.codex/cursor-fallback-state/traex-catalogs/` and selects it
+through `model_catalog_json`. Keep snapshots referenced by configuration or recovery journals.
+Switch state v3 preserves the original OpenAI baseline through direct Cursor ↔ TraeX transitions;
+existing v2 state is upgraded when first entering TraeX.
+
+TraeX requests are stateless: disconnection cancels the upstream request, and a retry sends the full history.
+The bridge only retries explicit admission rejection before the upstream accepts work; Codex automatic
+request/stream retries are disabled in the managed TraeX provider. Upstream queue heartbeats keep streams open.
+`status` and the dashboard report ongoing work, release identity, observed usage and delayed upstream quota.
+
+```sh
+cursor-sdk-bridge probe --traex          # 2 short real Astra outputs, synthetic tool round trip
+cursor-sdk-bridge probe --traex --image  # 1 short real Astra output, synthetic image
+cursor-sdk-bridge restart traex         # drain + idle/connection checks
+```
+
+Deploy builds the Node >=22 service with the committed npm lockfile and packages the bundle into the immutable
+Python release. A checkout build uses `npm --prefix integrations/traex ci --ignore-scripts --no-audit --no-fund`
+followed by `npm --prefix integrations/traex run build:bridge`. The repository copy is never a production entry point.
+For first activation after deploy, use `systemctl --user start cursor-sdk-bridge-traex.service` and verify
+`cursor-sdk-bridge status`; subsequent restarts use the guarded command above.
 
 ### Diagnose a failed or stuck session
 
@@ -181,5 +218,7 @@ Deterministic tests make no SDK calls:
 ```sh
 PYTHONDONTWRITEBYTECODE=1 ~/.codex/cursor-sdk2api/venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```
+
+The TraeX core also requires `npm --prefix integrations/traex run typecheck` and `npm --prefix integrations/traex test`.
 
 Current sanitized experiment receipts belong in `docs/evidence/`. Earlier skill-era investigations remain in Git history; use this guide and the operations document for commands and recovery.

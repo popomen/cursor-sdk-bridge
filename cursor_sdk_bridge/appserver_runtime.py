@@ -178,6 +178,12 @@ class DesktopRuntime:
             return False
         if expected["model_provider"] == "cursor":
             return set(snapshot["models"]) == ALIASES and not DesktopRuntime.catalog_stale(snapshot, config)
+        if expected["model_provider"] == "traex":
+            from cursor_sdk_bridge.traex import MODELS, DEFAULT_MODEL
+            actual = set(snapshot.get('models') or [])
+            return (DEFAULT_MODEL in actual and actual.issubset(MODELS)
+                    and expected['model'] in actual and bool(expected['model_catalog_json'])
+                    and not DesktopRuntime.catalog_stale(snapshot, config))
         selection_ok = expected['model'] in snapshot['models'] if expected['model'] else bool(snapshot.get('default_models'))
         return selection_ok and (
             bool(expected["model_catalog_json"]) or not ALIASES.intersection(snapshot["models"]))

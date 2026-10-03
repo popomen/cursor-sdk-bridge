@@ -63,7 +63,11 @@ def rollback(runtime, paths, journal, journal_path, state_dir):
     return restored
 
 
-def apply_mode(directory, mode, port=8789, restart=False, runtime=None):
+def apply_mode(directory, mode, port=None, restart=False, runtime=None):
+    if port is None:
+        port = 8792 if mode == "traex" else 8789
+    from cursor_sdk_bridge import traex
+    verify_target = traex.verify_service if mode == "traex" else verify_service
     directory = Path(directory)
     runtime = runtime or DesktopRuntime(directory)
     current_config = tomllib.loads((read(directory / "config.toml") or b"").decode())
@@ -73,29 +77,33 @@ def apply_mode(directory, mode, port=8789, restart=False, runtime=None):
     pending = read(journal_path)
     file_status = status(directory)
     state = json.loads(read(state_dir / "state.json") or b"{}")
-    clean = not file_status["transaction_pending"] and not file_status["managed_config_conflict"] and state.get("version", 2) == 2
+    clean = not file_status["transaction_pending"] and not file_status["managed_config_conflict"] and state.get("version", 2) in (2, 3)
     path_upgrade = mode == "cursor" and file_status["catalog_path_upgrade_required"]
     if clean and not path_upgrade and current_config.get("model_provider", "openai") == mode and runtime.matches(current, current_config):
-        if mode == "cursor":
-            verify_service(port)
+        if mode in ("cursor", "traex"):
+            verify_target(port)
         return current
     if not restart:
         if path_upgrade:
             raise RuntimeBlocked(CATALOG_PATH_UPGRADE)
         if clean and mode == "cursor" and catalog_reload_required(current, current_config):
             raise RuntimeBlocked(STALE_CATALOG)
-        raise RuntimeBlocked("Runtime switch not applied. Disconnect the Desktop SSH remote and run cursor-sdk-bridge switch codex cursor|restore --restart-daemon from a separate SSH terminal.")
+        raise RuntimeBlocked("Runtime switch not applied. Disconnect the Desktop SSH remote and run cursor-sdk-bridge switch codex openai|cursor|traex|restore --restart-daemon from a separate SSH terminal.")
     preliminary = runtime.idle()
     if not pending and preliminary['state'] != 'running':
         raise RuntimeBlocked('No running daemon to identify. Connect Desktop once, then disconnect and retry; configuration was not changed.')
-    if not pending and mode == "cursor":
-        verify_service(port)  # Detect old/dead adapters BEFORE stopping a healthy daemon.
-        if state.get("version", 2) != 2 or file_status["managed_config_conflict"]:
+    if not pending and mode in ("cursor", "traex"):
+        verify_target(port)  # Detect old/dead adapters BEFORE stopping a healthy daemon.
+        if state.get("version", 2) not in (2, 3) or file_status["managed_config_conflict"]:
             raise RuntimeBlocked("Recover the legacy/conflicting configuration before switching to Cursor.")
         if path_upgrade and not state:
             raise RuntimeBlocked("No saved OpenAI baseline for the catalog upgrade; configuration was not changed.")
-        bundled_catalog()  # Validate release assets before stopping a healthy daemon.
-        probe(port)  # Two real SDK outputs, synthetic tool only; no generation retry.
+        if mode == "cursor":
+            bundled_catalog()  # Validate release assets before stopping a healthy daemon.
+            probe(port)
+        else:
+            from cursor_sdk_bridge.probe_traex import probe as probe_traex
+            probe_traex(port)  # Two real SDK outputs, synthetic tool only; no generation retry.
     if state_dir.is_symlink():
         raise RuntimeBlocked("Switch state directory cannot be a symlink.")
     state_dir.mkdir(mode=0o700, exist_ok=True)

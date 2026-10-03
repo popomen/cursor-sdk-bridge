@@ -22,7 +22,8 @@ description: 运维独立 cursor-sdk-bridge 服务：检查 Codex 与 Claude Cod
 | --- | --- | --- | --- |
 | Codex | 8789 | `cursor-sdk-bridge-codex.service` | `~/.codex/cursor-sdk2api` |
 | Claude Code | 8790 | `cursor-sdk-bridge-claude.service` | `~/.codex/cursor-sdk2api-claude` |
-| Dashboard | 8791 | `cursor-sdk-bridge-dashboard.service` | 读取两个实例的元数据 |
+| TraeX（仅 Codex） | 8792 | `cursor-sdk-bridge-traex.service` | `~/.codex/traex-bridge`（仅元数据）；凭据仍在 `~/.traex-bridge` |
+| Dashboard | 8791 | `cursor-sdk-bridge-dashboard.service` | 读取三个实例的元数据 |
 
 Dashboard：`http://127.0.0.1:8791/`；远端机器需要端口转发，JSON 状态在 `/api/status`。
 `running_version` 是进程运行的提交，`deployed_version` 是 `current` 指向的提交。
@@ -37,11 +38,12 @@ cursor-sdk-bridge deploy <commit> --install-only
 cursor-sdk-bridge deploy <commit>
 cursor-sdk-bridge restart claude
 cursor-sdk-bridge restart codex
+cursor-sdk-bridge restart traex
 cursor-sdk-bridge restart dashboard
 ```
 
 - `--install-only` 安装到 `~/.local/share/cursor-sdk-bridge/<commit>`，用于临时端口验收。
-- 正式 deploy 切换 `current` 并注册、enable 三个 user units；它不启动、停止或重启服务。
+- 正式 deploy 切换 `current` 并注册、enable 四个 user units；它不启动、停止或重启服务。
 - units 从固定提交和独立 venv 启动；部署失败保留旧版本，运行参数和 proxychains 路由见项目文档。
 - 重启前立即核实 active、queued、unfinished/pending 和未结束连接；任一非零或无法核实就等待。
 - CLI 与 dashboard 用 drain 关闭新请求入口，再检查未完成请求与连接；不要直接绕过门禁重启。
@@ -67,7 +69,8 @@ Codex 切换由用户在独立 SSH 终端执行；先结束远端任务并断开
 
 ```bash
 cursor-sdk-bridge switch codex cursor --restart-daemon
-cursor-sdk-bridge switch codex restore --restart-daemon
+cursor-sdk-bridge switch codex traex --restart-daemon
+cursor-sdk-bridge switch codex openai --restart-daemon  # restore 为兼容别名
 ```
 
 agent 先把部署、预检和命令准备好，再请用户断开并执行；用户确认后检查 `cursor-sdk-bridge status`。
@@ -112,3 +115,13 @@ agent 先把部署、预检和命令准备好，再请用户断开并执行；�
 首次切换也可能运行两次真实预检；幂等检查是否耗用推理以 CLI 结果为准，不反复重跑。
 当前默认 `native`；`--mode legacy|reuse` 显式回退，实际模式以实例 `/health.mode` 核对。
 需要回退时部署已验证提交，等空闲再重启；协议对照用临时端口与独立状态目录。
+
+## TraeX 接入
+
+- TraeX 仅提供 Astra Responses，默认 `GPT-6-Astra[1m]` / medium；不接入 Claude Code。
+- `probe --traex` 为两次短工具往返，`probe --traex --image` 为一次图片验收，均消耗 TraeX 额度；普通状态与模型目录查询不推理。
+- 固定版本 Node 转换核心随不可变发布安装；本机 API key 必须有效，Codex 用 `auth.command` 读取原路径，不展示内容。
+- 三方切换复用运行时事务；v2 在进入 TraeX 时升级 v3，始终保留原 OpenAI 基线和两种自定义 provider 定义。
+- TraeX 实时目录生成内容哈希快照，再通过 `model_catalog_json` 加载，避免 Codex 合并显示其内置模型。保留配置/恢复日志仍引用的快照。
+- TraeX 无持久化生成账本：断线会取消；只对明确未入队的请求重试。不要将其视为 Cursor 的断线恢复服务。
+- 先查询进行中请求、排队和连接，再通过 `restart traex` 的 drain 门禁重启；额度未知不等于耗尽。

@@ -1,0 +1,37 @@
+{
+  "kind": "traex_astra_acceptance",
+  "upstream_commit": "9f6535f4940cf957b08eb4bb266fef10cef84f93",
+  "upstream_version": "0.6.4",
+  "validated_source": "checkout prior to implementation commit",
+  "date": "2026-10-03",
+  "temporary_port": 18792,
+  "real_model_outputs": 5,
+  "usage": {
+    "input_tokens": 400,
+    "output_tokens": 72
+  },
+  "checks": {
+    "namespace_tool_roundtrip": true,
+    "distinct_item_and_call_ids": true,
+    "streaming_completion": true,
+    "api_key_required": true,
+    "image_color_identification": true,
+    "isolated_codex_appserver_catalog": [
+      "GPT-6-Astra",
+      "GPT-6-Astra[1m]"
+    ],
+    "openai_auth_unchanged": true,
+    "isolated_runtime_matches_config": true
+  },
+  "observations": [
+    "First image probe completed upstream but failed an exact-string assertion; a subsequent random-quadrant probe passed normalized color-word comparison. No generation was automatically retried.",
+    "Codex merges remote and bundled catalogs; a filtered immutable catalog snapshot was required to expose only Astra."
+  ],
+  "privacy": "No prompts, tool arguments/results, generated text, API keys, tokens or raw upstream responses retained.",
+  "deterministic_checks": {
+    "python_tests_passed": 376,
+    "node_tests_passed": 254,
+    "typescript_typecheck": "passed",
+    "git_diff_check": "passed"
+  }
+}

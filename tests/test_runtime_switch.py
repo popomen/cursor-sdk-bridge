@@ -37,7 +37,7 @@ class FakeRuntime:
         selected['model_provider'] = selected['model_provider'] or 'openai'
         if models is None:
             models = sorted(ar.ALIASES) if selected['model_provider'] == 'cursor' else [selected['model'] or 'gpt-6-astra']
-        if modalities is None and selected['model_provider'] == 'cursor':
+        if modalities is None and selected['model_provider'] in ('cursor', 'traex'):
             modalities = ar.catalog_modalities(selected['model_catalog_json'])
         return {'state': 'running', 'pid': pid or self.next_pid,
                 'start_ticks': 10 * (pid or self.next_pid), 'executable': '/fixture/codex',

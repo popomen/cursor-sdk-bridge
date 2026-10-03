@@ -59,7 +59,7 @@ class DeployTests(unittest.TestCase):
         self.assertEqual(version.manifest_version(self.root / SHA / version.MANIFEST), SHA)
         self.assertEqual((self.root / SHA / 'installed-dependencies.txt').stat().st_mode & 0o777, 0o600)
 
-    def test_publish_enables_three_regular_units_without_starting(self):
+    def test_publish_enables_four_regular_units_without_starting(self):
         result = self.deploy()
         self.assertEqual((result['selected'], result['units_enabled'], result['services_restarted']), (True, True, False))
         self.assertEqual((self.root / 'current').resolve(), self.root / SHA)
