@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-05",
+  "timezone": "Asia/Shanghai",
+  "release_commit": "44099702299c953bc5aa6af8921b00738513516a",
+  "unit": "cursor-sdk-bridge-guide.service",
+  "port": 8794,
+  "unit_properties": [
+    "ActiveState=active",
+    "SubState=running",
+    "UnitFileState=enabled"
+  ],
+  "http_checks": [
+    {
+      "url": "http://127.0.0.1:8794/",
+      "status": 200,
+      "content_type": "text/html",
+      "sha256": "998c25a673395e2d96c2897c5bca3240ca654026f02bacd06aea5d901fb04a01"
+    },
+    {
+      "url": "http://[::1]:8794/",
+      "status": 200,
+      "content_type": "text/html",
+      "sha256": "998c25a673395e2d96c2897c5bca3240ca654026f02bacd06aea5d901fb04a01"
+    },
+    {
+      "url": "http://10.37.20.167:8794/",
+      "status": 200,
+      "content_type": "text/html",
+      "sha256": "998c25a673395e2d96c2897c5bca3240ca654026f02bacd06aea5d901fb04a01"
+    },
+    {
+      "url": "http://n37-020-167.byted.org:8794/",
+      "status": 200,
+      "content_type": "text/html",
+      "sha256": "998c25a673395e2d96c2897c5bca3240ca654026f02bacd06aea5d901fb04a01"
+    }
+  ],
+  "served_assets_match_commit": true,
+  "document_root_file_count": 3,
+  "repository_and_state_not_served": true,
+  "real_sdk_calls": 0,
+  "existing_bridge_services_restarted": false,
+  "access_verification_scope": "Host checks over loopback, IPv4, IPv6 and hostname. Remote client reachability depends on its network.",
+  "installed_browser_smoke": {
+    "status": "passed",
+    "messages_continuation": true,
+    "copy_on_http": true,
+    "mobile_320px_no_page_overflow": true
+  }
+}
