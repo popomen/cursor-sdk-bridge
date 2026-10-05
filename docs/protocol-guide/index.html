@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cursor SDK Bridge 协议转换说明：OpenAI Responses、Anthropic Messages、原生工具回调、流式事件和会话恢复。ASD-STE100 简化技术英语与中文对照。">
+  <meta name="color-scheme" content="light">
+  <title>Cursor SDK Bridge · 协议转换说明</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='9' fill='%23152826'/%3E%3Cpath d='M15 11L7 20l8 9m10-18l8 9-8 9' fill='none' stroke='%23b8dfcb' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body data-language="dual">
+<a class="skip" href="#main">Skip to content / 跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true">↔</span><span>CURSOR SDK BRIDGE<small>PROTOCOL FIELD GUIDE</small></span></a>
+  <div class="actions">
+    <div class="segmented" role="group" aria-label="Language / 阅读语言">
+      <button data-language="dual" aria-pressed="true">双语</button>
+      <button data-language="en" aria-pressed="false">EN</button>
+      <button data-language="zh" aria-pressed="false">中文</button>
+    </div>
+    <button class="print-button" id="print"><span lang="en">Print</span><span lang="zh-CN"> / 打印</span> ↗</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="eyebrow">IN THIS GUIDE</div>
+    <nav class="nav-links" aria-label="Contents / 目录">
+      <a href="#overview" class="active"><span class="num">01</span><span><span lang="zh-CN">转换总览</span><span class="nav-en" lang="en">The data path</span></span></a>
+      <a href="#request"><span class="num">02</span><span><span lang="zh-CN">请求与字段</span><span class="nav-en" lang="en">Request fields</span></span></a>
+      <a href="#tools"><span class="num">03</span><span><span lang="zh-CN">工具调用往返</span><span class="nav-en" lang="en">The tool cycle</span></span></a>
+      <a href="#stream"><span class="num">04</span><span><span lang="zh-CN">流式事件</span><span class="nav-en" lang="en">Stream events</span></span></a>
+      <a href="#state"><span class="num">05</span><span><span lang="zh-CN">状态与恢复</span><span class="nav-en" lang="en">State and recovery</span></span></a>
+      <a href="#limits"><span class="num">06</span><span><span lang="zh-CN">兼容范围</span><span class="nav-en" lang="en">Compatibility</span></span></a>
+      <a href="#sources"><span class="num">07</span><span><span lang="zh-CN">术语与依据</span><span class="nav-en" lang="en">Terms and sources</span></span></a>
+    </nav>
+    <div class="sidebar-note">IMPLEMENTATION SNAPSHOT<br><strong>abcca93 · 2026-10-05</strong><br>Python bridge / native mode<br><br>WRITING REFERENCE<br><strong>ASD-STE100 · Issue 9</strong><br><span lang="zh-CN">简化技术英语 + 中文对照</span><span lang="en">English with Chinese support</span></div>
+  </aside>
+  <main id="main">
+    <div class="hero">
+      <div class="eyebrow">ENGINEERING NOTE / 001</div>
+      <h1 class="hero-title"><span lang="zh-CN">Cursor SDK 的<br>协议转换</span><span class="en" lang="en">How the bridge changes API formats.</span></h1>
+      <div class="lead"><p class="en" lang="en">The bridge receives requests in OpenAI Responses and Anthropic Messages formats. Cursor SDK supplies the model output. The bridge sends each result in the client's format.</p><p class="zh" lang="zh-CN">客户端连接兼容 OpenAI 或 Anthropic 的本地接口。桥接器将请求交给 Cursor SDK，再把输出转回客户端需要的格式。</p></div>
+      <div class="scope"><span><i class="dot"></i>Responses + Messages</span><span>Python SDK · native</span><span>Source: abcca93</span><span>2026-10-05</span></div>
+    </div>
+
+    <section id="overview" aria-labelledby="overview-title">
+      <h2 id="overview-title" class="sr-only">01 · The data path / 转换总览</h2>
+      <div class="diagram" role="figure" aria-label="Clients send requests through the bridge to Cursor SDK. Results return through the same bridge.">
+        <div class="diagram-caption"><span class="eyebrow">01 / THE DATA PATH</span><span class="mono">REQUEST → &nbsp; ← RESPONSE</span></div>
+        <div class="architecture">
+          <div class="client-stack">
+            <div class="node"><strong>OpenAI Responses</strong><code>POST /v1/responses</code><p lang="en">Client: Codex</p><p class="zh" lang="zh-CN">客户端示例：Codex</p></div>
+            <div class="node"><strong>Anthropic Messages</strong><code>POST /v1/messages</code><p lang="en">Client: Claude Code</p><p class="zh" lang="zh-CN">客户端示例：Claude Code</p></div>
+          </div>
+          <div class="arrow" aria-hidden="true">⇄<small>JSON / SSE</small></div>
+          <div class="node bridge-node"><strong>Cursor SDK Bridge</strong><code>history + tools + policy</code><div class="node-line"></div><p lang="en">Validate the request.<br>Keep the run state.<br>Change the output format.</p><p lang="zh-CN">校验请求 · 维护运行状态 · 转换输出</p></div>
+          <div class="arrow" aria-hidden="true">⇄<small>CALLBACKS</small></div>
+          <div class="node sdk-node"><strong>Cursor Python SDK</strong><code>agents.create / resume</code><code>agent.send</code><p lang="en">The selected model produces text and tool calls.</p><p class="zh" lang="zh-CN">选定模型生成文本和工具调用。</p></div>
+        </div>
+        <p class="diagram-foot"><span lang="en">The API names identify the client formats. This path uses Cursor as the model service.</span><span class="zh" lang="zh-CN">API 名称表示客户端协议；这条链路的模型服务来自 Cursor。</span> <a class="source-ref" href="#src-code-core">[C1–C3]</a></p>
+      </div>
+      <div class="principles">
+        <article class="principle"><div class="kicker">01 / FORMAT</div><h3><span lang="zh-CN">共用一种内部结构</span><span lang="en">One internal format</span></h3><p lang="en">Messages becomes a Responses-shaped request. The two inputs then use the same history checks and SDK path.</p><p class="zh" lang="zh-CN">Messages 先转成类似 Responses 的内部请求，随后共用历史校验和 SDK 执行路径。</p></article>
+        <article class="principle"><div class="kicker">02 / EXECUTION</div><h3><span lang="zh-CN">客户端执行工具</span><span lang="en">The client operates tools</span></h3><p lang="en">SDK callbacks wait for results. The client operates each requested tool and sends its result back.</p><p class="zh" lang="zh-CN">SDK 回调等待结果。Codex 或 Claude Code 执行工具，再回传执行结果。</p></article>
+        <article class="principle"><div class="kicker">03 / STATE</div><h3><span lang="zh-CN">一次运行跨越多次请求</span><span lang="en">One run can continue</span></h3><p lang="en">A tool response ends the HTTP response. The SDK run stays open while its callback waits.</p><p class="zh" lang="zh-CN">工具调用响应会结束当前 HTTP 响应，但 SDK 运行仍等待回调结果。</p></article>
+      </div>
+      <div class="note"><p lang="en">This guide explains the Python bridge at commit <code>abcca93</code>. The command-line default is <code>native</code>. Read <code>/health.mode</code> for the active instance.</p><p class="zh" lang="zh-CN">本文解释源码版本 <code>abcca93</code>，重点是命令行默认的 <code>native</code> 模式。实际实例的运行模式以 <code>/health.mode</code> 为准。</p></div>
+    </section>
+
+    <section class="section" id="request" aria-labelledby="request-title">
+      <div class="section-head"><span class="section-number">02</span><h2 id="request-title"><span lang="zh-CN">请求与字段</span><span class="en-sub" lang="en">Request fields</span></h2></div>
+      <div class="section-intro"><p lang="en">The HTTP handler reads JSON. It validates the model, input items, tool schemas, and call IDs before SDK execution.</p><p class="zh" lang="zh-CN">HTTP 层读取 JSON，在调用 SDK 前检查模型、输入类型、工具参数定义和调用 ID。</p></div>
+      <div class="table-wrap"><table class="mapping"><caption class="sr-only">OpenAI and Anthropic field mapping</caption><thead><tr><th><span lang="en">Purpose</span><span lang="zh-CN">含义</span></th><th>OpenAI Responses</th><th>Anthropic Messages</th><th><span lang="en">Bridge behavior</span><span lang="zh-CN">桥接行为</span></th></tr></thead><tbody>
+        <tr><td><span lang="en">Instructions</span><span lang="zh-CN">指令</span></td><td><code>instructions</code></td><td><code>system</code></td><td><p lang="en">Text blocks become one instruction string.</p><p class="zh" lang="zh-CN">Messages 的 system 文本块合并为 instructions。</p></td></tr>
+        <tr><td><span lang="en">History</span><span lang="zh-CN">对话历史</span></td><td><code>input</code></td><td><code>messages[]</code></td><td><p lang="en">The bridge keeps messages, tool calls, and tool results in order.</p><p class="zh" lang="zh-CN">按原顺序保留消息、工具调用和工具结果。</p></td></tr>
+        <tr><td><span lang="en">Tool schema</span><span lang="zh-CN">工具定义</span></td><td><code>tools[].parameters</code><br><code>type: "function"</code></td><td><code>tools[].input_schema</code></td><td><p lang="en">The native engine adds a <code>CustomTool</code> with this schema to the SDK tool list.</p><p class="zh" lang="zh-CN">校验 schema，再注册 SDK CustomTool。</p></td></tr>
+        <tr><td><span lang="en">Tool choice</span><span lang="zh-CN">工具选择</span></td><td><code>auto / none / required</code><br><code>{type: "function", name}</code></td><td><code>auto / none / any</code><br><code>{type: "tool", name}</code></td><td><p lang="en"><code>any</code> becomes <code>required</code>. A tool selection by name limits the tools in the SDK tool list.</p><p class="zh" lang="zh-CN">any 转成 required；指定名称时只注册该工具。</p></td></tr>
+        <tr><td><span lang="en">Parallel calls</span><span lang="zh-CN">并行工具</span></td><td><code>parallel_tool_calls</code></td><td><code>disable_parallel_tool_use</code><br><span class="muted">in <code>tool_choice</code></span></td><td><p lang="en">The values have opposite meanings. <code>true</code> on the Anthropic field becomes <code>false</code> internally.</p><p class="zh" lang="zh-CN">布尔语义相反：禁止并行会转为 parallel_tool_calls=false。</p></td></tr>
+        <tr><td><span lang="en">Tool call</span><span lang="zh-CN">工具调用</span></td><td><code>function_call</code><br><code>call_id, name, arguments</code></td><td><code>tool_use</code><br><code>id, name, input</code></td><td><p lang="en">The bridge changes the input object to a JSON argument string. It keeps the public call ID.</p><p class="zh" lang="zh-CN">input 对象转成 arguments 字符串；公共调用 ID 关联后续结果。</p></td></tr>
+        <tr><td><span lang="en">Tool result</span><span lang="zh-CN">工具结果</span></td><td><code>function_call_output</code><br><code>call_id, output</code></td><td><code>tool_result</code><br><code>tool_use_id, content</code></td><td><p lang="en">The call ID connects the result to its waiting callback.</p><p class="zh" lang="zh-CN">通过 ID 找到等待中的回调，并填入结果。</p></td></tr>
+        <tr><td><span lang="en">Image</span><span lang="zh-CN">图片</span></td><td><code>input_image.image_url</code><br><span class="muted">base64 data URL</span></td><td><code>image.source</code><br><code>type: "base64"</code></td><td><p lang="en">Image data becomes an <code>SDKImage</code> attachment. A text marker keeps its position in the transcript.</p><p class="zh" lang="zh-CN">图片独立作为 SDKImage 附件，文本占位符保留在对话中的位置。</p></td></tr>
+        <tr><td><span lang="en">Assistant text</span><span lang="zh-CN">文本输出</span></td><td><code>output[].content[]</code><br><code>type: "output_text"</code></td><td><code>content[]</code><br><code>type: "text"</code></td><td><p lang="en">The bridge places SDK text in the selected response format.</p><p class="zh" lang="zh-CN">同一份 SDK 文本按客户端格式封装。</p></td></tr>
+      </tbody></table></div>
+      <p><a class="source-ref" href="#src-code-core">[C1, C2]</a> <a class="source-ref" href="#src-openai">[D1]</a> <a class="source-ref" href="#src-anthropic">[D2]</a></p>
+      <div class="two-col">
+        <article class="panel"><h3><span lang="zh-CN">模型别名决定 SDK 参数</span><span lang="en">The alias selects SDK settings</span></h3><p lang="en">Each advertised alias selects the model, context, effort, and speed. A model mismatch causes an error.</p><p class="zh" lang="zh-CN">/v1/models 中的别名确定模型、上下文、推理档位和速度；返回模型不匹配时请求失败。</p><pre class="mini-code">claude-opus-5-5-high
+  → id:      claude-opus-5-5
+  → context: 1m
+  → effort:  high
+  → fast:    false</pre><p><a class="source-ref" href="#src-code-models">[C6]</a></p></article>
+        <article class="panel"><h3><span lang="zh-CN">命名空间保留路由信息</span><span lang="en">Tool names keep their routes</span></h3><p lang="en">A namespace and name form a qualified name. Names outside the SDK rules get a <code>bridge_</code> alias. Responses uses the original namespace and name.</p><p class="zh" lang="zh-CN">namespace 与 name 先组成完整名称。名称不符合 SDK 规则时使用哈希别名；Responses 输出恢复 namespace 和 name。</p><pre class="mini-code">functions.read_file
+  → bridge_&lt;32 hex characters&gt;
+  → namespace: functions
+  → name: read_file</pre><p><a class="source-ref" href="#src-code-native">[C3]</a></p></article>
+      </div>
+    </section>
+
+    <section class="section" id="tools" aria-labelledby="tools-title">
+      <div class="section-head"><span class="section-number">03</span><h2 id="tools-title"><span lang="zh-CN">工具调用往返</span><span class="en-sub" lang="en">The tool cycle</span></h2></div>
+      <div class="section-intro"><p lang="en">Select an API format. Then select a step to see the data and SDK state.</p><p class="zh" lang="zh-CN">选择客户端协议，再逐步查看数据变化和 SDK 状态。下方使用虚构的加法示例，全部交互在浏览器内运行。</p></div>
+      <noscript><p class="no-js">Enable JavaScript for the interactive example. The numbered explanation below remains available. / 启用 JavaScript 可操作示例；下方仍有完整文字说明。</p></noscript>
+      <div class="explorer" id="explorer">
+        <div class="explorer-top"><div class="protocol-tabs" role="group" aria-label="Example API / 示例协议"><button data-protocol="responses" aria-pressed="true">OpenAI Responses</button><button data-protocol="messages" aria-pressed="false">Anthropic Messages</button></div><span class="example-label">SYNTHETIC EXAMPLE · NO API CALLS</span></div>
+        <div class="step-strip" role="group" aria-label="Cycle step / 流程步骤">
+          <button data-step="0" aria-current="step"><span class="step-n">01</span><span lang="en">Request</span><span lang="zh-CN">客户端请求</span></button>
+          <button data-step="1"><span class="step-n">02</span><span lang="en">Convert</span><span lang="zh-CN">统一格式</span></button>
+          <button data-step="2"><span class="step-n">03</span><span lang="en">Start SDK</span><span lang="zh-CN">启动 SDK</span></button>
+          <button data-step="3"><span class="step-n">04</span><span lang="en">Tool call</span><span lang="zh-CN">等待工具</span></button>
+          <button data-step="4"><span class="step-n">05</span><span lang="en">Tool result</span><span lang="zh-CN">回传结果</span></button>
+          <button data-step="5"><span class="step-n">06</span><span lang="en">End</span><span lang="zh-CN">最终响应</span></button>
+        </div>
+        <div class="explorer-body"><div class="stage-copy" id="stage-copy" aria-live="polite" aria-atomic="true"></div><div class="stage-code"><div class="code-top"><span id="code-label">POST /v1/responses</span><button class="copy-button" id="copy-code" aria-label="Copy example / 复制示例">COPY</button></div><pre class="code-scroll"><code id="stage-code"></code></pre></div></div>
+        <div class="explorer-bottom"><div class="controls"><button class="control-button" id="previous" aria-label="Previous step / 上一步">←</button><button class="control-button primary" id="next"><span lang="en">Next step</span><span lang="zh-CN">下一步</span> →</button><button class="control-button" id="play"><span lang="en">Play</span><span lang="zh-CN">播放流程</span></button></div><div class="step-progress" id="step-progress" aria-hidden="true"></div></div>
+      </div>
+      <ol class="tool-steps">
+        <li><p lang="en">The bridge adds each client tool to the SDK tool list. Each tool has a callback.</p><p class="zh" lang="zh-CN">桥接器为客户端工具注册 SDK 回调，参数 schema 同时用于校验。</p></li>
+        <li><p lang="en">The model starts the callback. The bridge makes a public call ID and a Future to receive the result.</p><p class="zh" lang="zh-CN">模型触发回调后，桥接器生成公共调用 ID，并建立等待结果的 Future。</p></li>
+        <li><p lang="en">The bridge sends <code>function_call</code> or <code>tool_use</code> to the client. The HTTP response ends.</p><p class="zh" lang="zh-CN">桥接器向客户端返回工具调用，结束本次 HTTP 响应；回调仍在等待。</p></li>
+        <li><p lang="en">The client operates the tool. Its next request includes the result and the necessary history.</p><p class="zh" lang="zh-CN">客户端执行工具。下一次请求携带结果，以及完整历史或可用的 previous_response_id。</p></li>
+        <li><p lang="en">The bridge validates each pending call. Correct results complete the waiting Futures. The same SDK run continues.</p><p class="zh" lang="zh-CN">桥接器校验整批待处理调用；合法结果完成 Future，使同一 SDK 运行继续。</p></li>
+        <li><p lang="en">The SDK run ends. The bridge validates the result and sends the final response.</p><p class="zh" lang="zh-CN">SDK 完成后，桥接器检查完整性与模型身份，再发送最终响应。</p></li>
+      </ol>
+      <div class="note"><p lang="en">Each pending call ID must have one result. Missing, duplicate, or changed calls cause a request error.</p><p class="zh" lang="zh-CN">一次返回必须完整匹配当前待处理批次。缺失、重复或被修改的调用会被拒绝，结果不会被提前消费。</p></div>
+      <p><a class="source-ref" href="#src-code-native">[C3]</a></p>
+    </section>
+
+    <section class="section" id="stream" aria-labelledby="stream-title">
+      <div class="section-head"><span class="section-number">04</span><h2 id="stream-title"><span lang="zh-CN">流式事件</span><span class="en-sub" lang="en">Stream events</span></h2></div>
+      <div class="section-intro"><p lang="en">In native mode, the bridge receives text and thinking through <code>on_delta</code>. The bridge changes these updates into Server-Sent Events (SSE).</p><p class="zh" lang="zh-CN">native 模式从 SDK 的 on_delta 获取文本和 thinking 增量，再编码成 SSE。下面展示一个仅含文本的成功响应。</p></div>
+      <div class="stream-demo">
+        <article class="stream-card"><h3>OpenAI Responses</h3><ul class="event-list"><li>response.created</li><li>response.in_progress</li><li>response.output_item.added</li><li>response.content_part.added</li><li class="delta">response.output_text.delta <small lang="en">One or more text updates.</small><small lang="zh-CN">可有多条增量。</small></li><li>response.output_text.done</li><li>response.content_part.done</li><li>response.output_item.done</li><li>response.completed</li></ul></article>
+        <article class="stream-card"><h3>Anthropic Messages</h3><ul class="event-list"><li>message_start</li><li>content_block_start</li><li class="delta">content_block_delta <small>delta.type = text_delta</small><small lang="en">One or more text updates.</small><small lang="zh-CN">可有多条增量。</small></li><li>content_block_stop</li><li>message_delta <small>stop_reason = end_turn</small></li><li>message_stop</li></ul></article>
+      </div>
+      <div class="table-wrap events"><table><thead><tr><th>SDK / Bridge</th><th>Responses</th><th>Messages</th></tr></thead><tbody>
+        <tr><td>text-delta</td><td>response.output_text.delta</td><td>content_block_delta → text_delta</td></tr>
+        <tr><td>thinking-delta</td><td>response.reasoning_summary_text.delta</td><td>content_block_delta → thinking_delta</td></tr>
+        <tr><td>CustomTool callback</td><td>response.function_call_arguments.delta<br>response.function_call_arguments.done</td><td>content_block_start → tool_use<br>content_block_delta → input_json_delta</td></tr>
+        <tr><td>Keepalive / 10 s</td><td>response.in_progress</td><td>ping</td></tr>
+        <tr><td>Success</td><td>response.completed</td><td>message_delta → message_stop</td></tr>
+        <tr><td>Failure after stream start</td><td>response.failed</td><td>error</td></tr>
+      </tbody></table></div>
+      <div class="two-col">
+        <article class="panel"><h3><span lang="zh-CN">文本实时发送，参数校验后发送</span><span lang="en">Tool arguments wait for checks</span></h3><p lang="en">The bridge sends text and thinking as it receives them. Tool arguments stream after the callback supplies a full, validated argument object.</p><p class="zh" lang="zh-CN">文本与 thinking 直接流式转发。工具参数等回调提供完整对象、通过校验后才分块发送，不转发上游未完成的参数片段。</p><p lang="en">The final response keeps the item IDs and text from earlier events.</p><p class="zh" lang="zh-CN">最终响应沿用已经发送的条目 ID 和文本。</p></article>
+        <article class="panel"><h3><span lang="zh-CN">终止事件表达真实状态</span><span lang="en">The final event shows the result</span></h3><p lang="en">A tool response can end while the SDK run waits. A failed stream ends with an error event.</p><p class="zh" lang="zh-CN">Responses 的 completed 只表示当前响应完成；SDK 可能仍在等工具。流中失败使用错误事件结束。</p><p lang="en">Messages uses <code>tool_use</code> for tool calls and <code>end_turn</code> for a final answer.</p><p class="zh" lang="zh-CN">Messages 分别用 tool_use 和 end_turn 表示工具调用与最终回答。</p></article>
+      </div>
+      <p style="margin-top:16px"><a class="source-ref" href="#src-code-stream">[C4]</a> <a class="source-ref" href="#src-stream-docs">[D3]</a></p>
+    </section>
+
+    <section class="section" id="state" aria-labelledby="state-title">
+      <div class="section-head"><span class="section-number">05</span><h2 id="state-title"><span lang="zh-CN">状态与恢复</span><span class="en-sub" lang="en">State and recovery</span></h2></div>
+      <div class="timeline">
+        <article><div class="eyebrow">A / INFERENCE</div><h3><span lang="zh-CN">推理任务</span><span lang="en">The inference job</span></h3><p lang="en">The service owns the job. A closed HTTP connection does not cancel active inference.</p><p class="zh" lang="zh-CN">服务持有推理任务；客户端断开连接不会取消已经运行的推理。</p></article>
+        <article><div class="eyebrow">B / WAITING</div><h3><span lang="zh-CN">等待工具结果</span><span lang="en">The waiting callback</span></h3><p lang="en">A callback waits up to its pending timeout. Its run counts as unfinished work.</p><p class="zh" lang="zh-CN">回调受 pending_timeout 限制；等待期间仍属于未完成工作。</p></article>
+        <article><div class="eyebrow">C / RECOVERY</div><h3><span lang="zh-CN">重试与续接</span><span lang="en">Retries and continuation</span></h3><p lang="en">An identical request joins its active job or reads a saved response. Failed inference has no automatic retry.</p><p class="zh" lang="zh-CN">相同请求加入正在运行的任务，或读取已保存的成功结果；失败推理不会自动重试。</p></article>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th><span lang="en">State store</span><span lang="zh-CN">状态</span></th><th><span lang="en">Purpose and limit</span><span lang="zh-CN">用途与边界</span></th></tr></thead><tbody>
+        <tr><td><code>previous_response_id</code></td><td><p lang="en">The Responses history cache adds earlier history to a later request. It is local memory, with a one-hour lifetime and capacity limits.</p><p class="zh" lang="zh-CN">本地内存缓存补全历史，保留一小时，最多 32 条且总量不超过 256 MiB；过期或丢失时需发送完整历史。</p></td></tr>
+        <tr><td><code>results.sqlite3</code></td><td><p lang="en">The private ledger saves completed responses for retries. The default retention is one hour, within 256 MiB.</p><p class="zh" lang="zh-CN">私有账本保存成功响应，默认保留一小时，总量上限 256 MiB。去重摘要包含展开的历史、请求策略和模式。</p></td></tr>
+        <tr><td><code>SDK agent lineage</code></td><td><p lang="en">A validated direct successor can continue the SDK conversation. A branch or changed policy starts a new agent with full history.</p><p class="zh" lang="zh-CN">经过验证的直接后继可恢复 agent；分支、策略变化或恢复不可用时，用完整历史创建新 agent。</p></td></tr>
+        <tr><td><code>pending callback</code></td><td><p lang="en">User context can follow tool results in the last callback result. Changed history, policy, or other roles need reconstruction.</p><p class="zh" lang="zh-CN">附加的 user 消息通过专用标记加入最后一个工具结果；历史、策略或其他角色变化会重建运行，并复用已有工具结果。</p></td></tr>
+      </tbody></table></div>
+      <div class="note"><p lang="en"><code>store: false</code> disables the Responses history cache. The retry ledger and SDK history stay separate. <code>--no-ledger</code> disables ledger retention.</p><p class="zh" lang="zh-CN">store=false 只关闭 Responses 历史缓存，不会关闭重试账本或 SDK 本地历史；账本保留由 --no-ledger 单独控制。</p></div>
+      <p lang="en">During reconstruction, matching completed tool calls receive saved results in order. This mechanism does not guarantee exactly-once execution across systems.</p><p class="zh" lang="zh-CN">重建时，匹配已完成调用的工具按出现顺序取回历史结果。这是基于现有记录的恢复机制，不构成跨系统的 exactly-once 保证。</p>
+      <p><a class="source-ref" href="#src-code-state">[C5]</a></p>
+    </section>
+
+    <section class="section" id="limits" aria-labelledby="limits-title">
+      <div class="section-head"><span class="section-number">06</span><h2 id="limits-title"><span lang="zh-CN">兼容范围</span><span class="en-sub" lang="en">Compatibility</span></h2></div>
+      <div class="section-intro"><p lang="en">The bridge implements a selected part of each API. This table gives the limits for this repository version.</p><p class="zh" lang="zh-CN">兼容范围以此仓库版本为准。协议格式相同，不代表各供应商的全部功能都已实现。</p></div>
+      <div class="table-wrap"><table class="limits"><thead><tr><th><span lang="en">Feature</span><span lang="zh-CN">功能</span></th><th><span lang="en">State</span><span lang="zh-CN">状态</span></th><th><span lang="en">Behavior</span><span lang="zh-CN">具体行为</span></th></tr></thead><tbody>
+        <tr><td>Responses / Messages</td><td><span class="status yes">SUPPORTED</span></td><td><p lang="en">The two endpoints send JSON or SSE. <code>/v1/models</code> lists accepted model aliases.</p><p class="zh" lang="zh-CN">两个端点都支持 JSON 和 SSE；模型必须使用目录内别名。</p></td></tr>
+        <tr><td>Chat Completions</td><td><span class="status no">ABSENT</span></td><td><p lang="en">This Python bridge has no <code>/v1/chat/completions</code> route.</p><p class="zh" lang="zh-CN">Python 桥接器未提供该路由。仓库内的 TraeX 是另一条链路，不在本文范围内。</p></td></tr>
+        <tr><td><span lang="en">Client tools</span><span lang="zh-CN">客户端工具</span></td><td><span class="status yes">SUPPORTED</span></td><td><p lang="en">Function tools use JSON Schema checks. The bridge disables SDK shell, file, task, and web tools.</p><p class="zh" lang="zh-CN">支持客户端函数工具；SDK 自带 shell、文件、task 和 web 工具关闭。</p></td></tr>
+        <tr><td><span lang="en">Server tools</span><span lang="zh-CN">托管工具</span></td><td><span class="status no">UNSUPPORTED</span></td><td><p lang="en">Responses rejects unsupported tool types. Messages removes Anthropic server tools from the converted tool list.</p><p class="zh" lang="zh-CN">Responses 拒绝不支持的工具类型；Messages 会过滤 Anthropic 托管工具，例如服务端 web_search。</p></td></tr>
+        <tr><td><code>max_tokens</code><br><code>thinking / output_config</code><br><code>cache_control</code></td><td><span class="status partial">NOT FORWARDED</span></td><td><p lang="en">The Messages conversion does not pass these options to SDK execution.</p><p class="zh" lang="zh-CN">Messages 转换层不传递这些生成选项；请求中出现这些字段不代表其语义生效。</p></td></tr>
+        <tr><td><code>reasoning.effort</code></td><td><span class="status partial">CHECKED</span></td><td><p lang="en">In Responses, the value must agree with the selected model alias.</p><p class="zh" lang="zh-CN">Responses 中该字段必须与模型别名档位一致；不一致则拒绝。</p></td></tr>
+        <tr><td><code>background / truncation</code></td><td><span class="status partial">RESTRICTED</span></td><td><p lang="en">Responses rejects enabled background mode and automatic truncation.</p><p class="zh" lang="zh-CN">不能通过 Responses 请求开启后台模式或自动截断。</p></td></tr>
+        <tr><td><span lang="en">Images</span><span lang="zh-CN">图片</span></td><td><span class="status partial">LIMITED</span></td><td><p lang="en">The bridge receives base64 PNG, JPEG, GIF, and WebP images. Each image can contain up to 5 MiB.</p><p lang="en">The prompt keeps the latest four images as attachments. Earlier images become omission markers.</p><p class="zh" lang="zh-CN">支持 base64 图片，单张最多 5 MiB；一次渲染最多附带最新四张，更早图片保留省略标记。Responses 的远程 URL 和 file_id 被拒绝。</p></td></tr>
+        <tr><td><span lang="en">Thinking</span><span lang="zh-CN">思考块</span></td><td><span class="status partial">CONVERTED</span></td><td><p lang="en">Messages output uses an empty local signature. The bridge ignores input thinking blocks. The bridge does not supply an Anthropic signature.</p><p class="zh" lang="zh-CN">Messages 输出 thinking 块的签名为空；输入 thinking / redacted_thinking 被跳过，不伪造上游签名。</p></td></tr>
+        <tr><td><code>usage / count_tokens</code></td><td><span class="status partial">ESTIMATED</span></td><td><p lang="en">Client usage is an estimate for one response. Cache counters are zero. SDK usage goes to private metadata logs.</p><p class="zh" lang="zh-CN">客户端 usage 是单次响应估算，缓存计数为零。SDK 的真实 usage 在运行完成时记录到元数据日志。</p></td></tr>
+        <tr><td><span lang="en">Other content blocks</span><span lang="zh-CN">其他内容块</span></td><td><span class="status partial">OMITTED</span></td><td><p lang="en">Unsupported Messages content becomes an omission marker. This includes image sources that are not base64.</p><p class="zh" lang="zh-CN">Messages 中无法转换的内容会变成可见的省略标记，包括非 base64 图片来源。</p></td></tr>
+      </tbody></table></div>
+      <details><summary><span lang="en">Why does the bridge use usage estimates?</span><span lang="zh-CN">为什么 usage 要使用估算值？</span></summary><p lang="en">The SDK supplies usage when the run ends. It includes all model calls in that run. Tool responses have no separate SDK usage.</p><p class="zh" lang="zh-CN">SDK 在运行结束时给出累计用量，覆盖运行内所有模型调用；中间工具响应没有独立的 SDK usage。直接回传累计值会误导客户端的上下文压缩判断。</p><pre class="mini-code">input_tokens ≈ 3000 + ceil(prompt_bytes / 2.3)
+               + 1600 × attached_image_count
+output_tokens ≈ ceil(output_bytes / 2.3)
+cache counters = 0</pre><p lang="en">These values help clients make an estimate of the context size. They are not exact tokenizer counts or billing records.</p><p class="zh" lang="zh-CN">估算用于客户端的上下文预算，不是精确分词结果或计费凭据。prompt_bytes 来自桥接器渲染的请求。</p></details>
+      <details><summary><span lang="en">What changes between the three engine modes?</span><span lang="zh-CN">native、reuse、legacy 有什么区别？</span></summary><div class="table-wrap"><table><thead><tr><th>Mode</th><th><span lang="en">History and tools</span><span lang="zh-CN">历史与工具</span></th><th><span lang="en">Output</span><span lang="zh-CN">输出</span></th></tr></thead><tbody><tr><td><code>native</code></td><td><span lang="en">Callbacks keep the SDK run open across tools.</span><span lang="zh-CN">工具回调跨 HTTP 请求等待；可恢复直接后继。</span></td><td><span lang="en">Live text and thinking deltas.</span><span lang="zh-CN">文本、thinking 实时增量。</span></td></tr><tr><td><code>reuse</code></td><td><span lang="en">A validated direct successor can continue the SDK conversation.</span><span lang="zh-CN">校验直接后继后复用 agent；工具由模型写入 JSON。</span></td><td><span lang="en">The model writes JSON. The bridge validates it before it sends the data.</span><span lang="zh-CN">缓冲并校验完整 JSON 后再发送。</span></td></tr><tr><td><code>legacy</code></td><td><span lang="en">Each request starts a new agent with full history.</span><span lang="zh-CN">每次创建新 agent，发送完整历史。</span></td><td><span lang="en">The model writes JSON. The bridge validates it before it sends the data.</span><span lang="zh-CN">缓冲并校验完整 JSON 后再发送。</span></td></tr></tbody></table></div><p lang="en">All three modes support service-owned jobs and ledger-based retries.</p><p class="zh" lang="zh-CN">三种模式均可使用服务持有的任务和重试账本。</p></details>
+      <p><a class="source-ref" href="#src-code-core">[C1, C2]</a> <a class="source-ref" href="#src-code-stream">[C4]</a> <a class="source-ref" href="#src-code-state">[C5]</a></p>
+    </section>
+
+    <section class="section" id="sources" aria-labelledby="sources-title">
+      <div class="section-head"><span class="section-number">07</span><h2 id="sources-title"><span lang="zh-CN">术语与依据</span><span class="en-sub" lang="en">Terms and sources</span></h2></div>
+      <div class="note"><p lang="en">The English text applies ASD-STE100 writing principles. It uses short sentences, active voice, and the same technical names throughout the text.</p><p lang="en">Descriptions use at most 25 words per sentence. Instructions use at most 20 words. A specialist must examine full dictionary compliance.</p><p class="zh" lang="zh-CN">英文按 ASD-STE100 的写作规则组织：短句、主动语态、术语一致；说明句最多 25 词，操作句最多 20 词。完整词典合规性仍需专业审核。中文为辅助对照，不属于英文标准的合规声明。</p><p><a class="source-ref" href="#src-ste">[D5]</a></p></div>
+      <dl class="glossary">
+        <div><dt>bridge / 桥接器</dt><dd><span lang="en">The local service that changes request and response formats.</span><span class="zh" lang="zh-CN">转换请求和响应格式的本地服务。</span></dd></div>
+        <div><dt>client / 客户端</dt><dd><span lang="en">The application that sends API requests and operates client tools.</span><span class="zh" lang="zh-CN">发出 API 请求并执行工具的应用。</span></dd></div>
+        <div><dt>agent / SDK 会话对象</dt><dd><span lang="en">The SDK object that holds a conversation and its settings.</span><span class="zh" lang="zh-CN">持有对话和配置的 SDK 对象。</span></dd></div>
+        <div><dt>run / SDK 运行</dt><dd><span lang="en">The work that starts with one call to <code>agent.send</code>.</span><span class="zh" lang="zh-CN">一次 agent.send 启动的工作，可跨多个工具步骤。</span></dd></div>
+        <div><dt>callback / 回调</dt><dd><span lang="en">A function that the SDK starts when the model needs a tool.</span><span class="zh" lang="zh-CN">模型请求工具时，SDK 调用的函数。</span></dd></div>
+        <div><dt>Future / 等待结果的对象</dt><dd><span lang="en">An object that receives a result when the result becomes available.</span><span class="zh" lang="zh-CN">在结果可用时接收结果、唤醒等待方的对象。</span></dd></div>
+        <div><dt>delta / 增量</dt><dd><span lang="en">A new part of text or data in a stream.</span><span class="zh" lang="zh-CN">流中新增加的一部分文本或数据。</span></dd></div>
+        <div><dt>ledger / 结果账本</dt><dd><span lang="en">A private database that keeps completed responses for retries.</span><span class="zh" lang="zh-CN">为重试保留成功响应的私有数据库。</span></dd></div>
+        <div><dt>schema / 数据结构定义</dt><dd><span lang="en">Rules that specify the permitted shape of tool arguments.</span><span class="zh" lang="zh-CN">规定工具参数结构和取值约束的规则。</span></dd></div>
+        <div><dt>SSE / 服务端发送事件</dt><dd><span lang="en">An HTTP format that sends a sequence of named events.</span><span class="zh" lang="zh-CN">通过 HTTP 持续发送具名事件的格式。</span></dd></div>
+      </dl>
+      <p class="muted" lang="en">API field names, product names, and code identifiers keep their exact spelling.</p><p class="zh" lang="zh-CN">API 字段、产品名、代码标识符保留原拼写；上表列出本文使用的主要技术术语。</p>
+      <details><summary><span lang="en">Technical verbs for computer operations</span><span lang="zh-CN">计算机操作专用动词</span></summary><p lang="en">This guide uses these technical verbs for computer processes under Rule 1.12.</p><p class="zh" lang="zh-CN">以下动词按 Rule 1.12 的计算机过程类别使用，含义在本文中保持一致。</p><dl class="glossary"><div><dt>validate</dt><dd><span lang="en">Make sure that data obeys the protocol rules.</span><span class="zh" lang="zh-CN">确认数据符合协议规则。</span></dd></div><div><dt>stream</dt><dd><span lang="en">Send data in parts while a process continues.</span><span class="zh" lang="zh-CN">过程进行期间分批发送数据。</span></dd></div><div><dt>save</dt><dd><span lang="en">Write data to a computer store for later use.</span><span class="zh" lang="zh-CN">把数据写入存储，以供后续读取。</span></dd></div><div><dt>call</dt><dd><span lang="en">Start a function through its software interface.</span><span class="zh" lang="zh-CN">通过软件接口启动函数。</span></dd></div><div><dt>disable</dt><dd><span lang="en">Set a software feature to an unavailable state.</span><span class="zh" lang="zh-CN">将软件功能设置为不可用状态。</span></dd></div><div><dt>support</dt><dd><span lang="en">Implement the specified feature in this software.</span><span class="zh" lang="zh-CN">在本软件中实现指定功能。</span></dd></div></dl></details>
+      <h3 style="margin-top:30px"><span lang="en">Implementation references</span><span lang="zh-CN">源码依据</span></h3>
+      <p class="muted" style="margin-top:9px;font-size:12px"><span lang="en">File locations refer to commit <code>abcca9367a3fe918466f0a8e316c16003bcd1575</code>.</span><span lang="zh-CN">文件位置均对应上述固定提交，可在仓库中定位。</span></p>
+      <ul class="source-list">
+        <li id="src-code-core"><span class="source-n">C1–2</span><div><code>cursor_sdk_bridge/responses_protocol.py:186</code><p><code>prepare_request</code> · <code>complete_response</code> · <code>normalize_tools</code></p><code>cursor_sdk_bridge/anthropic_protocol.py:121</code><p><code>prepare_messages</code> · <code>convert_messages</code> · <code>complete_message</code> · <code>reported_usage</code></p></div></li>
+        <li id="src-code-native"><span class="source-n">C3</span><div><code>cursor_sdk_bridge/native_backend.py:363</code><p><code>_tools</code> · <code>_execute</code> · <code>_continue</code> · <code>_drive</code> · <code>native_prompt</code></p></div></li>
+        <li id="src-code-stream"><span class="source-n">C4</span><div><code>cursor_sdk_bridge/live_output.py:62</code><p><code>ResponsesLive</code> · <code>MessagesLive</code> · <code>LiveOutput.finalize</code></p><code>cursor_sdk_bridge/cursor_sdk2api.py:452</code><p><code>_wait_inference</code> · <code>_messages</code> · <code>POST_PATHS</code></p></div></li>
+        <li id="src-code-state"><span class="source-n">C5</span><div><code>cursor_sdk_bridge/ledger.py:15</code><p><code>request_digest</code> · <code>ResultLedger</code></p><code>cursor_sdk_bridge/cursor_sdk2api.py:153</code><p><code>Service._remember</code> · <code>Service.submit</code> · <code>Service._run_job</code></p><code>docs/design.md</code><p><span lang="en">Engine modes, ownership, recovery, and evidence boundaries.</span><span lang="zh-CN">三种引擎、状态归属、恢复与证据边界。</span></p></div></li>
+        <li id="src-code-models"><span class="source-n">C6</span><div><code>cursor_sdk_bridge/models.py:19</code><p><code>Model.selection</code> · <code>MODELS</code></p></div></li>
+      </ul>
+      <h3 style="margin-top:30px"><span lang="en">Official references</span><span lang="zh-CN">官方参考</span></h3>
+      <ul class="source-list">
+        <li id="src-openai"><span class="source-n">D1</span><div><a href="https://developers.openai.com/api/docs/guides/function-calling" target="_blank" rel="noreferrer">OpenAI · Function calling ↗</a><p><span lang="en">Function calls, argument strings, and call results.</span><span lang="zh-CN">函数调用、参数字符串和结果关联。</span></p></div></li>
+        <li id="src-anthropic"><span class="source-n">D2</span><div><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls" target="_blank" rel="noreferrer">Anthropic · Handle tool calls ↗</a><p><code>tool_use</code> · <code>tool_result</code> · <code>stop_reason</code></p></div></li>
+        <li id="src-stream-docs"><span class="source-n">D3</span><div><a href="https://developers.openai.com/api/docs/guides/streaming-responses" target="_blank" rel="noreferrer">OpenAI · Streaming API responses ↗</a><br><a href="https://platform.claude.com/docs/en/build-with-claude/streaming" target="_blank" rel="noreferrer">Anthropic · Streaming messages ↗</a><p><span lang="en">Event names and stream order.</span><span lang="zh-CN">事件名称与流式顺序。</span></p></div></li>
+        <li><span class="source-n">D4</span><div><a href="https://cursor.com/docs/sdk/python" target="_blank" rel="noreferrer">Cursor · Python SDK ↗</a><p><code>CustomTool</code> · <code>AgentOptions</code> · <code>SendOptions.on_delta</code></p><p class="muted"><span lang="en">The repository implementation controls the behavior on this page. Current SDK documentation can include more features.</span><span lang="zh-CN">本文以仓库实现为准；当前 SDK 文档可能包含此桥接器尚未采用的功能。</span></p></div></li>
+        <li id="src-ste"><span class="source-n">D5</span><div><a href="https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf" target="_blank" rel="noreferrer">ASD-STE100 · Issue 9, 2025-01-15 ↗</a><br><a href="https://www.asd-ste100.org/STE_faq.html" target="_blank" rel="noreferrer">STEMG · Official FAQ ↗</a><p><span lang="en">Writing rules, controlled vocabulary, and technical names.</span><span lang="zh-CN">写作规则、受控词汇与技术名称。</span></p></div></li>
+      </ul>
+    </section>
+    <footer class="footer"><span>CURSOR SDK BRIDGE / PROTOCOL FIELD GUIDE<br>Source snapshot: abcca93 · 2026-10-05</span><span><span lang="en">Examples contain synthetic data.<br>This page makes no model calls.</span><span lang="zh-CN">示例全部为合成数据。<br>本页面不会发起模型调用。</span></span><a href="#main"><span lang="en">Back to top</span><span lang="zh-CN">回到顶部</span> ↑</a></footer>
+  </main>
+</div>
+</body>
+</html>

@@ -6,6 +6,10 @@ Cursor SDK Bridge exposes OpenAI Responses and Anthropic Messages through Cursor
 
 The command is `cursor-sdk-bridge`; the Python package is `cursor_sdk_bridge`.
 
+The [interactive protocol guide](docs/protocol-guide/index.html) explains Responses,
+Messages, native tool callbacks, streaming, and recovery in simplified technical
+English with Chinese support. See its [HTTP service notes](docs/protocol-guide/README.md).
+
 Both APIs expose all 20 Opus 5.5 variants: five efforts (`low`, `medium`, `high`, `xhigh`, `max`), two context windows, and two speeds. Replace `<effort>` in these IDs:
 
 | Context | Speed | Model ID |

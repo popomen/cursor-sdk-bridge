@@ -1,0 +1,55 @@
+{
+  "synthetic_data_only": true,
+  "real_sdk_calls": 0,
+  "status": "passed",
+  "http_status": 200,
+  "sections": 7,
+  "protocol_paths": 2,
+  "steps_per_path": 6,
+  "viewport_language_cases": [
+    "1440:en",
+    "1440:zh",
+    "1440:dual",
+    "768:en",
+    "768:zh",
+    "768:dual",
+    "390:en",
+    "390:zh",
+    "390:dual",
+    "320:en",
+    "320:zh",
+    "320:dual"
+  ],
+  "javascript_errors": 0,
+  "external_http_requests": 0,
+  "broken_internal_links": 0,
+  "duplicate_ids": 0,
+  "copy_on_http": true,
+  "play_pause": true,
+  "previous_next_restart": true,
+  "language_persistence": true,
+  "print_expands_details": true,
+  "descriptive_sentence_word_limit": 25,
+  "max_english_sentence_words": 14,
+  "sentence_length_method": "Whitespace count; code identifiers count as one term; headings included.",
+  "dictionary_review": "Consulted ASD-STE100 Issue 9; applied targeted word and meaning corrections. No formal compliance certification.",
+  "date": "2026-10-05",
+  "timezone": "Asia/Shanghai",
+  "source_commit": "abcca9367a3fe918466f0a8e316c16003bcd1575",
+  "deterministic_tests": {
+    "count": 376,
+    "status": "passed",
+    "real_sdk_calls": 0
+  },
+  "assets": {
+    "index.html": "998c25a673395e2d96c2897c5bca3240ca654026f02bacd06aea5d901fb04a01",
+    "style.css": "00339e6b4e291baa4d1e3c6b73729359771bbcec7db20992a8733c4e3842c3b1",
+    "app.js": "1f7a6165fb68081f23e5e163d098972f81c74013c600a7c7080b8c542e01a8b5"
+  },
+  "source_references_checked": true,
+  "protocol_examples": {
+    "status": "passed",
+    "checks": 6,
+    "basis": "Repository request and response conversion functions; synthetic fixtures only."
+  }
+}
